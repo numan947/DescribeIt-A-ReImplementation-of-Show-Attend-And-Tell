@@ -122,6 +122,7 @@ class ImageCaptionDataset(Dataset):
         self.split = split.upper()
         assert self.split in {"TRAIN", "TEST", "VALID"}
         
+        
         self.h = h5py.File(os.path.join(data_folder, self.split+"_IMAGES_"+base_filename+".hdf5"), 'r')
         
         self.images = self.h['images']
@@ -149,7 +150,7 @@ class ImageCaptionDataset(Dataset):
         caption = torch.LongTensor(self.captions[i])
         caplen = torch.LongTensor([self.caplens[i]])
         
-        if self.split is "TRAIN":
+        if self.split == "TRAIN":
             return img, caption, caplen
         else:
             all_captions = torch.LongTensor(
@@ -159,6 +160,7 @@ class ImageCaptionDataset(Dataset):
 
 if __name__ == "__main__":
     pass
+    # data = ImageCaptionDataset("./output", "")
 # This is for testing the code in this file and creating the dataset for the first time 
     # parse_and_prepare_data('coco',
     #                        '/media/numan947/New Volume2/Datasets/karpathy_captions/dataset_coco.json',

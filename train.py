@@ -5,10 +5,11 @@ from data import ImageCaptionDataset
 from torch.utils.data import DataLoader
 from torchvision.transforms import transforms
 from commons import *
-import os, json
+import os, json, tqdm
 import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
+from models import Decoder, Encoder
 
 def plot_grad_flow(named_parameters):
     ave_grads = []
@@ -146,7 +147,7 @@ def train(data_folder, data_name, captions_per_image, min_word_freq, resume=Fals
     # TRAINING PARAMS
     start_epoch = 0
     epochs = 120
-    batch_size = 32
+    batch_size = 64
     early_stopper = EarlyStopping(track="min", save_model_name=os.path.join(data_folder,"BEST_MODEL_SO_FAR.pt"))
     workers = 1
     encoder_lr = 1e-4
@@ -163,8 +164,88 @@ def train(data_folder, data_name, captions_per_image, min_word_freq, resume=Fals
     with open(word_map_file, 'r') as j:
         word_map  = json.load(j)
     
+    
+    
+    decoder = Decoder(attention_dim=attention_dim, embedding_dim=emb_dim, decoder_dim=decoder_dim, vocab_size=len(word_map), dropout=0.5)
+    encoder = Encoder()
+    encoder.fine_tune(fine_tune_encoder)
+    
+    decoder_optimizer = torch.optim.Adam(params=filter(lambda p: p.requires_grad, decoder.parameters()), lr=decoder_lr)
+    encoder_optimizer = torch.optim.Adam(params=filter(lambda p: p.requires_grad, encoder.parameters()), lr=encoder_lr) if fine_tune_encoder else None
+    
+    
+    encoder.to(device)
+    decoder.to(device)
+    
+    
+    criterion = torch.nn.CrossEntropyLoss().to(device)
+    
+    normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+    
+    train_dataset = ImageCaptionDataset(data_folder, base_filename, "train", transform=transforms.Compose([normalize]))
+    valid_dataset = ImageCaptionDataset(data_folder, base_filename, "valid", transform=transforms.Compose([normalize]))
+    
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, num_workers=workers, pin_memory=True, shuffle=True)
+    valid_loader = DataLoader(valid_dataset, batch_size=batch_size, num_workers=workers, pin_memory=True, shuffle=False)
+    
+    
+    train_single_epoch(encoder, decoder, train_loader, encoder_optimizer, decoder_optimizer, criterion)
+    
+    
+    
+    
+    
     if resume:
         pass
     else:
         pass
+
+
+
+def train_single_epoch(encoder, decoder, train_loader, encoder_optimizer, decoder_optimizer, criterion, alpha_c=1.0, grad_clip=1.0):
+    tl, ta = 0, 0 
+    encoder.train()
+    decoder.train()
     
+    for i, (imgs, caps, caplens) in enumerate(tqdm.tqdm(train_loader, total=len(train_loader))):
+        imgs = imgs.to(device)
+        caps = caps.to(device)
+        caplens = caplens.to(device)
+        
+        
+        imgs = encoder(imgs)
+        scores, caps_sorted, decode_lengths, alphas, sort_ind = decoder(imgs, caps, caplens)
+        
+        targets = caps_sorted[:, 1:]
+        
+        scores = torch.nn.utils.rnn.pack_padded_sequence(scores, decode_lengths, batch_first=True).data
+        targets = torch.nn.utils.rnn.pack_padded_sequence(targets, decode_lengths, batch_first=True).data
+        
+        loss = criterion(scores, targets)
+        
+        loss+=alpha_c*((1.0 - alphas.sum(dim=1))**2).mean()
+        
+        ta+= calculate_accuracy(scores, targets, 5)
+        tl+=loss.item()
+        
+        decoder_optimizer.zero_grad()
+        if encoder_optimizer is not None:
+            encoder_optimizer.zero_grad()
+        
+        loss.backward()
+        
+        if grad_clip is not None:
+            torch.nn.utils.clip_grad_norm_(decoder.parameters(), grad_clip)
+            if encoder_optimizer is not None:
+                torch.nn.utils.clip_grad_norm_(encoder.parameters(), grad_clip)
+        
+        
+        decoder_optimizer.step()
+        
+        if encoder_optimizer is not None:
+            encoder_optimizer.step()
+        
+        if i%50 == 0:
+            print("TL: {}, TA: {}".format(1.0*tl/(i+1), 1.0*ta/(i+1)))
+
+    return tl/len(train_loader), ta/len(train_loader)
