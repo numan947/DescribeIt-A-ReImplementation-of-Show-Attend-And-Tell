@@ -14,6 +14,7 @@ import apex, gc
 from apex import amp
 from nltk.translate.bleu_score import corpus_bleu
 from nltk.translate.meteor_score import meteor_score
+import sys
 
 def plot_grad_flow(named_parameters):
     ave_grads = []
@@ -49,7 +50,7 @@ def clear_cuda():
     torch.cuda.empty_cache()
     gc.collect()
 
-def print_epoch_stat(epoch_idx, time_elapsed_in_seconds, history=None, train_loss=None, train_accuracy=None, valid_loss=None, valid_accuracy=None, bleu4=None):
+def print_epoch_stat(start_time, epoch_idx, time_elapsed_in_seconds, history=None, train_loss=None, train_accuracy=None, valid_loss=None, valid_accuracy=None, bleu4=None):
     print("\n\nEPOCH {} Completed, Time Taken: {}".format(epoch_idx+1, datetime.timedelta(seconds=time_elapsed_in_seconds)))
     if train_loss is not None:
         if history is not None:
@@ -70,8 +71,11 @@ def print_epoch_stat(epoch_idx, time_elapsed_in_seconds, history=None, train_los
     if bleu4 is not None:
         if history is not None:
             history.loc[epoch_idx, "bleu4"] = bleu4
-        print("\tBLEU Score \t{:0.9}%".format(100.0*bleu4))
-
+        print("\tBLEU Score \t{:0.9}".format(100.0*bleu4))
+    
+    history.loc[epoch_idx, "epoch_time"] = datetime.timedelta(seconds=time_elapsed_in_seconds)
+    history.loc[epoch_idx, "total_time"] = datetime.timedelta(seconds=time.time() - start_time)
+    
     return history
 
 class EarlyStopping:
@@ -127,17 +131,7 @@ class EarlyStopping:
 
 
 
-
-
-
-
-
-
-
-
-
-
-def train(seed, data_folder, data_name, captions_per_image, min_word_freq, use_half_precision=False, half_precision_mode=None, half_precision_loss_scale="dynamic", resume=False):
+def train(seed, data_folder, data_name, captions_per_image, min_word_freq, fine_tune_encoder = False, use_half_precision=False, half_precision_mode=None, half_precision_loss_scale="dynamic", resume=False):
     clear_cuda()
     torch.manual_seed(seed)
     
@@ -162,14 +156,12 @@ def train(seed, data_folder, data_name, captions_per_image, min_word_freq, use_h
     early_stopper = EarlyStopping(track="min", save_model_name=os.path.join(data_folder,"BEST_MODEL_SO_FAR.pt"), patience=12)
     workers = 1
     encoder_lr = 1e-4
-    decoder_lr = 5e-4
-    grad_clip = 5.0
+    decoder_lr = 4e-4
+    grad_clip = 1.05
     alpha_c = 1.0
     best_bleu4 = 0.0
-    fine_tune_encoder = True
     checkpoint = "checkpoint.pt"
     history = "SEED_{}_HISTORY.csv".format(seed)
-    
     
     
     
@@ -235,24 +227,33 @@ def train(seed, data_folder, data_name, captions_per_image, min_word_freq, use_h
     else:
         history = pd.DataFrame()
         history.index.name = "Epoch"
+
+    # FOR DEBUGGING    
+    # vl, va, bleu4 = evaluate_on_validation(encoder, decoder, criterion, valid_loader, word_map)
+    # print(vl, va, bleu4)
+    # return
     
-    
+    start_time = time.time()
     for e in range(start_epoch, epochs):
         if early_stopper.early_stop:
             break
         
-        if early_stopper.counter>0 and early_stopper.counter%8==0:
+        if early_stopper.counter>0 and early_stopper.counter%3==0:
             adjust_learning_rate(decoder_optimizer, 0.8)
             if fine_tune_encoder:
                 adjust_learning_rate(encoder_optimizer, 0.8)
+
         
         curt = time.time()    
-        print("EPOCH: {}/{}, Encoder LR: {}, Decoder LR: {}".format(e, epochs, get_lr(encoder_optimizer) if fine_tune_encoder else -1000, get_lr(decoder_optimizer)))
-        tl, ta = train_single_epoch(encoder, decoder, train_loader, encoder_optimizer, decoder_optimizer, criterion, use_half_precision=use_half_precision)
+        print("EPOCH: {}/{}, Encoder LR: {}, Decoder LR: {}".format(e+1, epochs, get_lr(encoder_optimizer) if fine_tune_encoder else -1000, get_lr(decoder_optimizer)))
+        tl, ta = train_single_epoch(encoder, decoder, train_loader, encoder_optimizer, decoder_optimizer, criterion, use_half_precision=use_half_precision, grad_clip=grad_clip)
         vl, va, bleu4 = evaluate_on_validation(encoder, decoder, criterion, valid_loader, word_map)
-        early_stopper(bleu4, decoder)
-        print_epoch_stat(e, time.time()-curt, history, tl, ta, vl, va, bleu4)
+        
+        early_stopper(-bleu4, decoder)
+        
+        print_epoch_stat(start_time, e, time.time()-curt, history, tl, ta, vl, va, bleu4)
         print("SAVING ... ", end="")
+        
         save_information = {
             'epoch':e,
             'encoder_optimizer_state':encoder_optimizer.state_dict() if fine_tune_encoder else None,
@@ -273,59 +274,97 @@ def train_single_epoch(encoder, decoder, train_loader, encoder_optimizer, decode
     encoder.train()
     decoder.train()
     
+    # Parameter clipper functions
+    def half_param_clipper():
+        torch.nn.utils.clip_grad_norm_(amp.master_params(decoder_optimizer), grad_clip)
+        if encoder_optimizer is not None:
+            torch.nn.utils.clip_grad_norm_(amp.master_params(encoder_optimizer), grad_clip)
+    def full_param_clipper():
+        torch.nn.utils.clip_grad_norm_(decoder.parameters(), grad_clip)
+        if encoder_optimizer is not None:
+            torch.nn.utils.clip_grad_norm_(encoder.parameters(), grad_clip)
+    
+    # Backward pass functions
+    def half_backward(loss, optimizers):
+        with amp.scale_loss(loss, optimizers) as scaled_loss:
+            scaled_loss.backward()
+    def full_backward(loss, optimizers):
+        loss.backward() # optimizer not needed
+    
+    # Zero grad and step functions if encoder is available
+    def encoder_decoder_zero_grad():
+        encoder_optimizer.zero_grad()
+        decoder_optimizer.zero_grad()
+    def encoder_decoder_step():
+        encoder_optimizer.step()
+        decoder_optimizer.step()
+    
+    # Zero grad and step functions if encoder is not available
+    def decoder_zero_grad():
+        decoder_optimizer.zero_grad()
+    def decoder_step():
+        decoder_optimizer.step()
+    
+    
+    param_clipper_fun = None
+    backward_fun = None
+    zero_grad_fun = None
+    step_fun = None
+    optimizer_list = None
+    
+    
+    # select different functions based on whether half precision training is on and encoder is available
+    if use_half_precision:
+        if grad_clip is not None:
+            param_clipper_fun = half_param_clipper
+        backward_fun = half_backward
+    else:
+        if grad_clip is not None:
+            param_clipper_fun = full_param_clipper
+        backward_fun = full_backward
+    
+    if encoder_optimizer is not None:
+        zero_grad_fun = encoder_decoder_zero_grad
+        step_fun = encoder_decoder_step
+        optimizer_list = [encoder_optimizer, decoder_optimizer]
+    else:
+        zero_grad_fun = decoder_zero_grad
+        step_fun = decoder_step
+        optimizer_list = decoder_optimizer
+ 
+ 
     for i, (imgs, caps, caplens) in enumerate(tqdm.tqdm(train_loader, total=len(train_loader))):
+        
+        # data to gpu
         imgs = imgs.to(device)
         caps = caps.to(device)
         caplens = caplens.to(device)
         
-        
+        # forward pass
         imgs = encoder(imgs)
         scores, caps_sorted, decode_lengths, alphas, sort_ind = decoder(imgs, caps, caplens)
         
+        # target and scores collection
         targets = caps_sorted[:, 1:]
-        
         scores = torch.nn.utils.rnn.pack_padded_sequence(scores, decode_lengths, batch_first=True).data
         targets = torch.nn.utils.rnn.pack_padded_sequence(targets, decode_lengths, batch_first=True).data
         
+        # loss calculation
         loss = criterion(scores, targets)
+        loss += alpha_c*((1.0 - alphas.sum(dim=1))**2).mean()
         
-        loss+=alpha_c*((1.0 - alphas.sum(dim=1))**2).mean()
+        # save for avg loss and accuracy
+        ta += calculate_accuracy(scores, targets, 5)
+        tl += loss.item()
         
-        ta+= calculate_accuracy(scores, targets, 5)
-        tl+=loss.item()
-        
-        decoder_optimizer.zero_grad()
-        if encoder_optimizer is not None:
-            encoder_optimizer.zero_grad()
-        
-        if use_half_precision:
-            if encoder_optimizer is not None:
-                with amp.scale_loss(loss, [decoder_optimizer, encoder_optimizer]) as scaled_loss:
-                    scaled_loss.backward()
-            else:
-                with amp.scale_loss(loss, decoder_optimizer) as scaled_loss:
-                    scaled_loss.backward()
-        else:
-            loss.backward()
-        
-        if grad_clip is not None:
-            if not use_half_precision:
-                torch.nn.utils.clip_grad_norm_(decoder.parameters(), grad_clip)
-                if encoder_optimizer is not None:
-                    torch.nn.utils.clip_grad_norm_(encoder.parameters(), grad_clip)
-            else:
-                torch.nn.utils.clip_grad_norm_(amp.master_params(decoder_optimizer), grad_clip)
-                if encoder_optimizer is not None:
-                    torch.nn.utils.clip_grad_norm_(amp.master_params(encoder_optimizer), grad_clip)
-
-
-        decoder_optimizer.step()
-        
-        if encoder_optimizer is not None:
-            encoder_optimizer.step()
-
-        if i>0 and i%2000 == 0:
-            print("TL: {}, TA: {}".format(1.0*tl/(i+1), 1.0*ta/(i+1)))
+        # backward pass
+        zero_grad_fun()
+        backward_fun(loss, optimizer_list)
+        param_clipper_fun()        
+        step_fun()
+        if i>0 and i<=16000 and i%500==0:
+            sys.stdout.write("\rTL: {}, TA: {}\n".format(1.0*tl/(i+1), 1.0*ta/(i+1)))
+    
     return tl/len(train_loader), ta/len(train_loader)
 
 def evaluate_on_validation(encoder, decoder, criterion, valid_loader, word_map, alpha_c=1.0):
@@ -358,21 +397,27 @@ def evaluate_on_validation(encoder, decoder, criterion, valid_loader, word_map, 
             vl+=loss.item()
             va+=calculate_accuracy(scores, targets, k=5)
             
-                        
+# BLEU score calculation
+            allcaps = allcaps[sort_ind]
             for j in range(allcaps.shape[0]):
                 img_caps = allcaps[j].tolist()
-                img_captions = list(map(lambda  c: [w for w in c if w not in {word_map['<start>'], word_map['<pad>']}], img_caps))
-                
+                img_captions = list()                
+                for line in img_caps:
+                    line = [c for c in line if c not in {word_map['<start>'], word_map['<pad>']}]
+                    img_captions.append(line)
                 references.append(img_captions)
-            
+            # print(scores_copy.shape)
             _, preds = torch.max(scores_copy, dim=2)
+            
             preds = preds.tolist()
+            
             temp_preds = list()
             
             for j, p in enumerate(preds):
                 temp_preds.append(preds[j][:decode_lengths[j]])
             preds = temp_preds
             hypotheses.extend(preds)
-            assert len(references) == len(hypotheses)
             
+            assert len(references) == len(hypotheses)
+
     return vl/len(valid_loader), va/len(valid_loader), corpus_bleu(references, hypotheses)

@@ -27,7 +27,7 @@ class Encoder(nn.Module):
     def forward(self, images):
         out = self.resnet(images)
         out = self.adaptive_pool(out)
-        return out.permute(0, 2, 3, 1)
+        return out.permute(0, 2, 3, 1) # batch_size X encoded_size X encoded_size X depth (2048)
 
 
 class SelfAttention(nn.Module):
@@ -63,6 +63,7 @@ class Decoder(nn.Module):
         self.embedding = nn.Embedding(self.vocab_size, self.embedding_dim)
         self.dropout = nn.Dropout(p=dropout)
         self.decode_step = nn.LSTMCell(self.embedding_dim+self.encoder_dim, self.decoder_dim, bias=True)
+        
         self.init_h = nn.Linear(encoder_dim, decoder_dim)
         self.init_c = nn.Linear(encoder_dim, decoder_dim)
         self.f_beta = nn.Linear(decoder_dim, encoder_dim)
@@ -86,7 +87,6 @@ class Decoder(nn.Module):
         mean_encoder_out = encoder_out.mean(dim=1)
         h = self.init_h(mean_encoder_out)
         c = self.init_c(mean_encoder_out)
-        
         return h,c
     
     def forward(self, encoder_out, encoded_captions, caption_lengths):
@@ -109,25 +109,33 @@ class Decoder(nn.Module):
         max_len = max(decode_lengths)
         
         predictions = torch.zeros(batch_size, max_len, vocab_size).to(device)
-        alphas = torch.zeros(batch_size, max(decode_lengths), pixel_count).to(device)
+        alphas = torch.zeros(batch_size, max_len, pixel_count).to(device)
         
         for t in range(max_len):
             batch_size_t = sum([l>t for l in decode_lengths])
-            attn_enc, alpha = self.attention(encoder_out[:batch_size_t], h[:batch_size_t])
             
-            gate = torch.sigmoid(self.f_beta(h[:batch_size_t]))
+            encoder_out_t = encoder_out[:batch_size_t]
+            decoder_hidden_t = h[:batch_size_t]
+            decoder_cell_t = c[:batch_size_t]
+            embeddings_t = embeddings[:batch_size_t, t, :]
+            
+            attn_enc, alpha = self.attention(encoder_out_t, decoder_hidden_t)
+            gate = torch.sigmoid(self.f_beta(decoder_hidden_t))
             attn_enc = gate * attn_enc # elementwise multiplication
-            h, c = self.decode_step(torch.cat([embeddings[:batch_size_t,t,:], attn_enc], dim=1), (h[:batch_size_t], c[:batch_size_t]))
+            
+            lstm_input = torch.cat([embeddings_t, attn_enc], dim=1)
+            
+            h, c = self.decode_step(lstm_input, (decoder_hidden_t, decoder_cell_t))
             
             pred = self.fc(self.dropout(h))
             
             predictions[:batch_size_t, t, :] = pred
             alphas[:batch_size_t, t, :] = alpha
-        
+            
         return predictions, encoded_captions, decode_lengths, alphas, sort_ind
     
 if __name__ == "__main__":
     pass
-    Encoder()
-    SelfAttention(10,10,10)
-    Decoder(10,10,20,30)
+    # Encoder()
+    # SelfAttention(10,10,10)
+    # Decoder(10,10,20,30)

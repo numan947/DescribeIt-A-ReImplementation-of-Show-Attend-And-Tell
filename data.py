@@ -26,8 +26,8 @@ def parse_and_prepare_data(dataset, karpathy_json_path, image_folder, captions_p
         captions = []
         for c in img['sentences']:
             word_freq.update(c['tokens'])
-        if len(c['tokens']) <= max_len:
-            captions.append(c['tokens'])
+            if len(c['tokens']) <= max_len:
+                captions.append(c['tokens'])
 
         if len(captions) == 0:
             continue
@@ -163,24 +163,24 @@ if __name__ == "__main__":
     # data = ImageCaptionDataset("./output", "")
 # This is for testing the code in this file and creating the dataset for the first time 
     # parse_and_prepare_data('coco',
-    #                        '/media/numan947/New Volume2/Datasets/karpathy_captions/dataset_coco.json',
-    #                        '/media/numan947/New Volume2/Datasets/coco',
+    #                        '/mnt/BRCD-2/Datasets/karpathy_captions/dataset_coco.json',
+    #                        '/mnt/BRCD-2/Datasets/coco',
     #                        5,
     #                        5,
     #                        './output/',
     #                        50
     #                        )
     # parse_and_prepare_data('flickr8k',
-    #                        '/media/numan947/New Volume2/Datasets/karpathy_captions/dataset_flickr8k.json',
-    #                        '/media/numan947/New Volume2/Datasets/flickr8k/flickr8k_images',
+    #                        '/mnt/BRCD-2/Datasets/karpathy_captions/dataset_flickr8k.json',
+    #                        '/mnt/BRCD-2/Datasets/flickr8k/flickr8k_images',
     #                        5,
     #                        5,
     #                        './output/',
     #                        50
     #                        )
     # parse_and_prepare_data('flickr30k',
-    #                        '/media/numan947/New Volume2/Datasets/karpathy_captions/dataset_flickr30k.json',
-    #                        '/media/numan947/New Volume2/Datasets/flickr30k/flickr30k_images',
+    #                        '/mnt/BRCD-2/Datasets/karpathy_captions/dataset_flickr30k.json',
+    #                        '/mnt/BRCD-2/Datasets/flickr30k/flickr30k_images',
     #                        5,
     #                        5,
     #                        './output/',
