@@ -2,6 +2,8 @@ import torch
 import torch.nn as nn
 import torchvision
 from commons import *
+import tqdm
+import random
 
 class Encoder(nn.Module):
     def __init__(self, encoded_image_size=14, fine_tune=True):
@@ -76,12 +78,27 @@ class Decoder(nn.Module):
         self.fc.bias.data.fill_(0.0)
         self.fc.weight.data.uniform_(-0.1, 0.1)
     
-    def load_pretrained_embeddings(self, embeddings):
-        self.embedding.weight = nn.Parameter(embeddings)
-    
-    def fine_tune_embeddings(self, fine_tune):
-        for p in self.embedding.parameters():
+    def load_pretrained_embeddings(self, embedding_path, word_map):
+        # self.embedding.weight = nn.Parameter(embeddings)
+        print("LOADING PRETRAINED EMBEDDINGS...")
+        all_lines = None
+        rev_word_map = {v:k for k,v in word_map.items()}
+        word_map_keys = word_map.keys()
+        
+        with open(embedding_path) as f:
+            all_lines = f.readlines()
+        for i, line in enumerate(tqdm.tqdm(all_lines)):
+            line = line.strip().split(" ")
+            # vocab[line[0]] = map(torch.FloatTensor, list(map(float, line[1:])))
+            if line[0] in word_map_keys:
+                self.embedding.weight.data[word_map[line[0]]] = torch.FloatTensor(list(map(float, line[1:])))
+                
+    def fine_tune_embeddings(self, fine_tune, exceptions=[]):
+        for i, p in enumerate(self.embedding.parameters()):
+            if i in exceptions:
+                continue
             p.requires_grad = fine_tune
+            
     
     def init_hidden_state(self, encoder_out):
         mean_encoder_out = encoder_out.mean(dim=1)
@@ -89,7 +106,7 @@ class Decoder(nn.Module):
         c = self.init_c(mean_encoder_out)
         return h,c
     
-    def forward(self, encoder_out, encoded_captions, caption_lengths):
+    def forward(self, encoder_out, encoded_captions, caption_lengths, teacher_forcing_ratio=0.5):
         batch_size = encoder_out.size(0)
         encoder_dim = encoder_out.size(-1)
         vocab_size = self.vocab_size
@@ -112,12 +129,18 @@ class Decoder(nn.Module):
         alphas = torch.zeros(batch_size, max_len, pixel_count).to(device)
         
         for t in range(max_len):
+            
             batch_size_t = sum([l>t for l in decode_lengths])
             
             encoder_out_t = encoder_out[:batch_size_t]
             decoder_hidden_t = h[:batch_size_t]
             decoder_cell_t = c[:batch_size_t]
             embeddings_t = embeddings[:batch_size_t, t, :]
+            
+            if random.random()<teacher_forcing_ratio and t>0:
+                predicted = predicted[:batch_size_t]
+                embeddings_t = self.embedding(predicted)
+            
             
             attn_enc, alpha = self.attention(encoder_out_t, decoder_hidden_t)
             gate = torch.sigmoid(self.f_beta(decoder_hidden_t))
@@ -128,7 +151,7 @@ class Decoder(nn.Module):
             h, c = self.decode_step(lstm_input, (decoder_hidden_t, decoder_cell_t))
             
             pred = self.fc(self.dropout(h))
-            
+            _, predicted = pred.max(dim=1)
             predictions[:batch_size_t, t, :] = pred
             alphas[:batch_size_t, t, :] = alpha
             

@@ -158,6 +158,7 @@ class ImageCaptionDataset(Dataset):
             )
             return img, caption, caplen, all_captions
 
+
 if __name__ == "__main__":
     pass
     # data = ImageCaptionDataset("./output", "")

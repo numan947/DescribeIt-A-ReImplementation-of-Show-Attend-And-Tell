@@ -104,13 +104,15 @@ class EarlyStopping:
         self.delta = delta
         self.save_model_name = save_model_name
 
-    def __call__(self, current_score, model):
+    def __call__(self, current_score, encoder, encoder_save_path, decoder, decoder_save_path):
 
         score = -current_score
 
         if self.best_score is None:
             self.best_score = score
-            self.save_checkpoint(current_score, model)
+            self.save_checkpoint(current_score)
+            torch.save(encoder.state_dict(), encoder_save_path)
+            torch.save(decoder.state_dict(), decoder_save_path)
         elif ((score < self.best_score + self.delta) and self.track=="min") or ((score>self.best_score+self.delta) and self.track=="max"):
             self.counter += 1
             print(f'EarlyStopping counter: {self.counter} out of {self.patience}')
@@ -118,20 +120,22 @@ class EarlyStopping:
                 self.early_stop = True
         else:
             self.best_score = score
-            self.save_checkpoint(current_score, model)
+            self.save_checkpoint(current_score)
             self.counter = 0
+            torch.save(encoder.state_dict(), encoder_save_path)
+            torch.save(decoder.state_dict(), decoder_save_path)
 
-    def save_checkpoint(self, new_best, model):
+    def save_checkpoint(self, new_best):
         '''Saves model when validation loss decrease.'''
         if self.verbose:
             print(f'Found better solution ({self.val_best:.6f} --> {new_best:.6f}).  Saving model ...')
-        torch.save(model.state_dict(), self.save_model_name)
+        # torch.save(model.state_dict(), self.save_model_name)
         self.val_best = new_best
 
 
 
 
-def train(seed, data_folder, data_name, captions_per_image, min_word_freq, fine_tune_encoder = False, use_half_precision=False, half_precision_mode=None, half_precision_loss_scale="dynamic", resume=False):
+def train(seed, data_folder, data_name, captions_per_image, min_word_freq, pretrained_embeddings=None, pretrained_embedding_dim=None, fine_tune_embedding=False, fine_tune_encoder = False, use_half_precision=False, half_precision_mode=None, half_precision_loss_scale="dynamic", resume=False):
     clear_cuda()
     torch.manual_seed(seed)
     
@@ -141,9 +145,14 @@ def train(seed, data_folder, data_name, captions_per_image, min_word_freq, fine_
     base_filename = data_name+"_"+str(captions_per_image)+"_cap_per_img_"+str(min_word_freq)+"_min_word_freq"
     cudnn.benchmark = True
     
+    ENCODER_STATE_FILE = data_folder+"ENCODER_STATE_{}_".format(seed)+data_name.upper()+".pt"
+    DECODER_STATE_FILE = data_folder+"DECODER_STATE_{}_".format(seed)+data_name.upper()+".pt"
     
     # MODEL PARAMS
-    emb_dim = 512
+    if pretrained_embeddings is not None:
+        emb_dim = pretrained_embedding_dim
+    else:
+        emb_dim = 512
     attention_dim = 512
     decoder_dim = 512
     dropout = 0.5
@@ -153,15 +162,15 @@ def train(seed, data_folder, data_name, captions_per_image, min_word_freq, fine_
     start_epoch = 0
     epochs = 120
     batch_size = 64
-    early_stopper = EarlyStopping(track="min", save_model_name=os.path.join(data_folder,"BEST_MODEL_SO_FAR.pt"), patience=12)
+    early_stopper = EarlyStopping(track="min", save_model_name=os.path.join(data_folder,"BEST_MODEL_SO_FAR.pt"), patience=9)
     workers = 1
     encoder_lr = 1e-4
     decoder_lr = 4e-4
     grad_clip = 1.05
     alpha_c = 1.0
     best_bleu4 = 0.0
-    checkpoint = "checkpoint.pt"
-    history = "SEED_{}_HISTORY.csv".format(seed)
+    checkpoint = "CHECKPOINT_{}_".format(seed)+data_name.upper()+".pt"
+    history = data_name.upper()+"_SEED_{}_HISTORY.csv".format(seed)
     
     
     
@@ -175,6 +184,10 @@ def train(seed, data_folder, data_name, captions_per_image, min_word_freq, fine_
     
     
     decoder = Decoder(attention_dim=attention_dim, embedding_dim=emb_dim, decoder_dim=decoder_dim, vocab_size=len(word_map), dropout=0.5)
+    if pretrained_embeddings is not None:
+        decoder.load_pretrained_embeddings(pretrained_embeddings, word_map)
+        decoder.fine_tune_embeddings(fine_tune_embedding, exceptions=[word_map['<unk>'], word_map['<pad>'], word_map['<end>'], word_map['<start>']])
+
     encoder = Encoder()
     encoder.fine_tune(fine_tune_encoder)
     
@@ -222,6 +235,7 @@ def train(seed, data_folder, data_name, captions_per_image, min_word_freq, fine_
         start_epoch = saved_information['epoch'] + 1
         early_stopper.counter = saved_information['early_stopper_counter']
         early_stopper.early_stop = saved_information['early_stopper_early_stop']
+        early_stopper.best_score = saved_information['early_stopper_best_score']
         print("Resuming From {}".format(start_epoch))
         
     else:
@@ -239,9 +253,9 @@ def train(seed, data_folder, data_name, captions_per_image, min_word_freq, fine_
             break
         
         if early_stopper.counter>0 and early_stopper.counter%3==0:
-            adjust_learning_rate(decoder_optimizer, 0.8)
+            adjust_learning_rate(decoder_optimizer, 0.5)
             if fine_tune_encoder:
-                adjust_learning_rate(encoder_optimizer, 0.8)
+                adjust_learning_rate(encoder_optimizer, 0.1)
 
         
         curt = time.time()    
@@ -249,7 +263,7 @@ def train(seed, data_folder, data_name, captions_per_image, min_word_freq, fine_
         tl, ta = train_single_epoch(encoder, decoder, train_loader, encoder_optimizer, decoder_optimizer, criterion, use_half_precision=use_half_precision, grad_clip=grad_clip)
         vl, va, bleu4 = evaluate_on_validation(encoder, decoder, criterion, valid_loader, word_map)
         
-        early_stopper(-bleu4, decoder)
+        early_stopper(-bleu4, encoder, ENCODER_STATE_FILE, decoder, DECODER_STATE_FILE)
         
         print_epoch_stat(start_time, e, time.time()-curt, history, tl, ta, vl, va, bleu4)
         print("SAVING ... ", end="")
@@ -262,7 +276,8 @@ def train(seed, data_folder, data_name, captions_per_image, min_word_freq, fine_
             'encoder_state':encoder.state_dict(),
             'decoder_state':decoder.state_dict(),
             'early_stopper_counter':early_stopper.counter,
-            'early_stopper_early_stop':early_stopper.early_stop
+            'early_stopper_early_stop':early_stopper.early_stop,
+            'early_stopper_best_score':early_stopper.best_score
         }
         
         torch.save(save_information, checkpoint)
@@ -383,7 +398,7 @@ def evaluate_on_validation(encoder, decoder, criterion, valid_loader, word_map, 
             caplens = caplens.to(device)
             
             imgs = encoder(imgs)
-            scores, caps_sorted, decode_lengths, alphas, sort_ind = decoder(imgs, caps, caplens)
+            scores, caps_sorted, decode_lengths, alphas, sort_ind = decoder(imgs, caps, caplens, teacher_forcing_ratio=1.0)
             
             targets = caps_sorted[:, 1:]
             
