@@ -149,7 +149,7 @@ def evaluate(word_map, encoder, decoder, dataset, beam_size, max_step=50):
 
 def visualize_attention(image_path, seq, alphas, rev_wordmap, smooth=True, max_step=50):
     save_path = os.path.abspath(image_path).split(".")[0]+"_ANNOTATED.jpg"
-    UPSAMPLE_SIZE = 25
+    UPSAMPLE_SIZE = 16 # original model's input size was 224X224
     image = Image.open(image_path)
     image = image.resize([14*UPSAMPLE_SIZE,14*UPSAMPLE_SIZE], Image.LANCZOS)
     words = [rev_wordmap[p] for p in seq]
@@ -171,7 +171,7 @@ def visualize_attention(image_path, seq, alphas, rev_wordmap, smooth=True, max_s
         if t == 0:
             plt.imshow(alpha, alpha=0)
         else:
-            plt.imshow(alpha, alpha=0.75)
+            plt.imshow(alpha, alpha=0.85)
         
         plt.set_cmap(cm.Greys_r)
         plt.axis('off')

@@ -398,7 +398,7 @@ def evaluate_on_validation(encoder, decoder, criterion, valid_loader, word_map, 
             caplens = caplens.to(device)
             
             imgs = encoder(imgs)
-            scores, caps_sorted, decode_lengths, alphas, sort_ind = decoder(imgs, caps, caplens, teacher_forcing_ratio=1.0)
+            scores, caps_sorted, decode_lengths, alphas, sort_ind = decoder(imgs, caps, caplens, teacher_forcing_ratio=0.0)
             
             targets = caps_sorted[:, 1:]
             
