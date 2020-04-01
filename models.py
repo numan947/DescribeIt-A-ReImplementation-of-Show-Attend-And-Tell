@@ -135,11 +135,15 @@ class Decoder(nn.Module):
             encoder_out_t = encoder_out[:batch_size_t]
             decoder_hidden_t = h[:batch_size_t]
             decoder_cell_t = c[:batch_size_t]
-            embeddings_t = embeddings[:batch_size_t, t, :]
             
             if random.random()<teacher_forcing_ratio and t>0:
                 predicted = predicted[:batch_size_t]
                 embeddings_t = self.embedding(predicted)
+                # print("NTF")
+            else:
+                embeddings_t = embeddings[:batch_size_t, t, :]
+                # print("TF")
+                
             
             
             attn_enc, alpha = self.attention(encoder_out_t, decoder_hidden_t)
