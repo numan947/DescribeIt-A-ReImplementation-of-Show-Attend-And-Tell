@@ -134,7 +134,7 @@ def evaluate(word_map, encoder, decoder, dataset, beam_size, max_step=50):
                 
                 assert len(hypotheses) == len(references)
                 
-            except e:
+            except Exception as  e:
                 print("CAPS GENERATION FAILED FOR {}th image".format(i))
         
         all_bleu = list()
