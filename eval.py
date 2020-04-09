@@ -147,8 +147,8 @@ def evaluate(word_map, encoder, decoder, dataset, beam_size, max_step=50):
         return all_bleu
 
 
-def visualize_attention(image_path, seq, alphas, rev_wordmap, smooth=True, max_step=50):
-    save_path = os.path.abspath(image_path).split(".")[0]+"_ANNOTATED.jpg"
+def visualize_attention(seed, image_path, seq, alphas, rev_wordmap, smooth=True, max_step=50):
+    save_path = os.path.abspath(image_path).split(".")[0]+"_SEED_{}_ANNOTATED.jpg".format(seed)
     UPSAMPLE_SIZE = 16 # original model's input size was 224X224
     image = Image.open(image_path)
     image = image.resize([14*UPSAMPLE_SIZE,14*UPSAMPLE_SIZE], Image.LANCZOS)
@@ -182,7 +182,7 @@ def visualize_attention(image_path, seq, alphas, rev_wordmap, smooth=True, max_s
     
     print(' '.join(words))
 
-def generate_caption(encoder, decoder, image_paths, word_map, beam_size, max_step=50):
+def generate_caption(seed, encoder, decoder, image_paths, word_map, beam_size, max_step=50):
     if not isinstance(image_paths, list):
         image_paths = [image_paths]
     
@@ -203,4 +203,4 @@ def generate_caption(encoder, decoder, image_paths, word_map, beam_size, max_ste
             i = completed_seqs_scores.index(max(completed_seqs_scores))
             seq = completed_seqs[i]
             alpha = torch.FloatTensor(completed_seqs_alpha[i])
-            visualize_attention(image_path, seq, alpha, rev_wmap)
+            visualize_attention(seed, image_path, seq, alpha, rev_wmap)

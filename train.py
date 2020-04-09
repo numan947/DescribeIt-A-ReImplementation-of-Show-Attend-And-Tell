@@ -9,12 +9,13 @@ import os, json, tqdm, datetime
 import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
-from models import Decoder, Encoder
+from models import Decoder, Encoder, SoftLabelLoss, WeightedCrossEntropyLoss, WeightedSimilarityLoss
 import apex, gc
 from apex import amp
 from nltk.translate.bleu_score import corpus_bleu
 from nltk.translate.meteor_score import meteor_score
 import sys
+import visdom
 
 def plot_grad_flow(named_parameters):
     ave_grads = []
@@ -133,9 +134,22 @@ class EarlyStopping:
         self.val_best = new_best
 
 
+VISDOM_PORT = 8080
+VISDOM_SERVER = "192.168.0.109"
+VISDOM = None
 
 
-def train(seed, data_folder, data_name, captions_per_image, min_word_freq, pretrained_embeddings=None, pretrained_embedding_dim=None, fine_tune_embedding=False, fine_tune_encoder = False, use_half_precision=False, half_precision_mode=None, half_precision_loss_scale="dynamic", resume=False):
+
+
+
+def train(seed, data_folder, data_name, captions_per_image, min_word_freq, pretrained_embeddings=None, fine_tune_embedding=False, fine_tune_encoder = False, use_half_precision=False, half_precision_mode=None, half_precision_loss_scale="dynamic", resume=False):
+    
+    global VISDOM
+    
+    VISDOM = visdom.Visdom(server=VISDOM_SERVER, port=VISDOM_PORT)
+    
+    
+    
     clear_cuda()
     torch.manual_seed(seed)
     
@@ -149,10 +163,7 @@ def train(seed, data_folder, data_name, captions_per_image, min_word_freq, pretr
     DECODER_STATE_FILE = data_folder+"DECODER_STATE_{}_".format(seed)+data_name.upper()+".pt"
     
     # MODEL PARAMS
-    if pretrained_embeddings is not None:
-        emb_dim = pretrained_embedding_dim
-    else:
-        emb_dim = 512
+    emb_dim = 512
     attention_dim = 512
     decoder_dim = 512
     dropout = 0.5
@@ -161,11 +172,11 @@ def train(seed, data_folder, data_name, captions_per_image, min_word_freq, pretr
     # TRAINING PARAMS
     start_epoch = 0
     epochs = 120
-    batch_size = 64
-    early_stopper = EarlyStopping(track="min", save_model_name=os.path.join(data_folder,"BEST_MODEL_SO_FAR.pt"), patience=9)
+    batch_size = 32
+    early_stopper = EarlyStopping(track="min", save_model_name=os.path.join(data_folder,"BEST_MODEL_SO_FAR.pt"), patience=15)
     workers = 1
-    encoder_lr = 1e-4
-    decoder_lr = 4e-4
+    encoder_lr = 5e-5
+    decoder_lr = 1e-3
     grad_clip = 1.05
     alpha_c = 1.0
     best_bleu4 = 0.0
@@ -181,11 +192,16 @@ def train(seed, data_folder, data_name, captions_per_image, min_word_freq, pretr
     with open(word_map_file, 'r') as j:
         word_map  = json.load(j)
     
-    
-    
+    if pretrained_embeddings is not None:
+        pretrained_embeddings, pretrained_emb_shape = prepare_embeddings(pretrained_embeddings)
+        print(pretrained_emb_shape)
+        matched_embeddings = torch.FloatTensor(get_matched_embeddings(pretrained_embeddings, word_map, dim=pretrained_emb_shape))
+        emb_dim = pretrained_emb_shape
+        
+        
     decoder = Decoder(attention_dim=attention_dim, embedding_dim=emb_dim, decoder_dim=decoder_dim, vocab_size=len(word_map), dropout=0.5)
     if pretrained_embeddings is not None:
-        decoder.load_pretrained_embeddings(pretrained_embeddings, word_map)
+        decoder.load_pretrained_embeddings(matched_embeddings)
         decoder.fine_tune_embeddings(fine_tune_embedding, exceptions=[word_map['<unk>'], word_map['<pad>'], word_map['<end>'], word_map['<start>']])
 
     encoder = Encoder()
@@ -208,7 +224,8 @@ def train(seed, data_folder, data_name, captions_per_image, min_word_freq, pretr
         else:
             decoder, decoder_optimizer = amp.initialize(decoder, decoder_optimizer, opt_level=half_precision_mode, loss_scale=half_precision_loss_scale)
     
-    criterion = torch.nn.CrossEntropyLoss().to(device)
+    criterion = torch.nn.CrossEntropyLoss(ignore_index=word_map['<pad>']).to(device)
+    # criterion = WeightedSimilarityLoss(matched_embeddings, ignore_idx=word_map['<pad>']).to(device)
     
     normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
     
@@ -221,6 +238,8 @@ def train(seed, data_folder, data_name, captions_per_image, min_word_freq, pretr
     
     if resume:
         history = pd.read_csv(history_path, index_col="Epoch")
+        for index, row in history.iterrows():
+            visdom_it(index, row["train_loss"], row['valid_loss'], row['train_accuracy'], row['valid_accuracy'], row['bleu4'])
         saved_information = torch.load(checkpoint, map_location=torch.device('cpu'))
         
         encoder.load_state_dict(saved_information["encoder_state"])
@@ -238,6 +257,8 @@ def train(seed, data_folder, data_name, captions_per_image, min_word_freq, pretr
         early_stopper.best_score = saved_information['early_stopper_best_score']
         print("Resuming From {}".format(start_epoch))
         
+        
+        
     else:
         history = pd.DataFrame()
         history.index.name = "Epoch"
@@ -252,7 +273,7 @@ def train(seed, data_folder, data_name, captions_per_image, min_word_freq, pretr
         if early_stopper.early_stop:
             break
         
-        if early_stopper.counter>0 and early_stopper.counter%3==0:
+        if early_stopper.counter>0 and early_stopper.counter%5==0:
             adjust_learning_rate(decoder_optimizer, 0.5)
             if fine_tune_encoder:
                 adjust_learning_rate(encoder_optimizer, 0.1)
@@ -283,6 +304,18 @@ def train(seed, data_folder, data_name, captions_per_image, min_word_freq, pretr
         torch.save(save_information, checkpoint)
         history.to_csv(history_path, index="Epoch")
         print("SAVED")
+        
+        visdom_it(e, tl, vl, ta, va, bleu4)
+
+def visdom_it(e, tl, vl, ta, va, bleu4):
+    if e == 0:
+        VISDOM.line(X=np.array([e]), Y=np.expand_dims(np.array([tl, vl]), axis=0), win="Loss Curves", opts={'title':"Loss", 'legend':["train", "valid"]})
+        VISDOM.line(X=np.array([e]), Y=np.expand_dims(np.array([ta, va]), axis=0), win="Accuracy Curves", opts={'title':"Accuracy", 'legend':["train", "valid"]})
+        VISDOM.line(X=np.array([e]), Y=np.expand_dims(np.array([bleu4]), axis=0), win="BLUE Score", opts={'title':"BLEU4", 'legend':["valid-bleu"]})
+    else:
+        VISDOM.line(X=np.array([e]), Y=np.expand_dims(np.array([tl, vl]), axis=0), win="Loss Curves", opts={'title':"Loss", 'legend':["train", "valid"]}, update="append")
+        VISDOM.line(X=np.array([e]), Y=np.expand_dims(np.array([ta, va]), axis=0), win="Accuracy Curves", opts={'title':"Accuracy", 'legend':["train", "valid"]}, update="append")
+        VISDOM.line(X=np.array([e]), Y=np.expand_dims(np.array([bleu4]), axis=0), win="BLUE Score", opts={'title':"BLEU4", 'legend':["valid-bleu"]}, update="append")     
 
 def train_single_epoch(encoder, decoder, train_loader, encoder_optimizer, decoder_optimizer, criterion, alpha_c=1.0, grad_clip=0.97, use_half_precision=False):
     tl, ta = 0, 0 
@@ -357,7 +390,7 @@ def train_single_epoch(encoder, decoder, train_loader, encoder_optimizer, decode
         
         # forward pass
         imgs = encoder(imgs)
-        scores, caps_sorted, decode_lengths, alphas, sort_ind = decoder(imgs, caps, caplens)
+        scores, caps_sorted, decode_lengths, alphas, sort_ind = decoder(imgs, caps, caplens, teacher_forcing_ratio=0.8)
         
         # target and scores collection
         targets = caps_sorted[:, 1:]
@@ -377,7 +410,7 @@ def train_single_epoch(encoder, decoder, train_loader, encoder_optimizer, decode
         backward_fun(loss, optimizer_list)
         param_clipper_fun()        
         step_fun()
-        if i>0 and i<=16000 and i%500==0:
+        if i>0 and i<=16000 and i%200==0:
             sys.stdout.write("\rTL: {}, TA: {}\n".format(1.0*tl/(i+1), 1.0*ta/(i+1)))
     
     return tl/len(train_loader), ta/len(train_loader)
@@ -398,7 +431,7 @@ def evaluate_on_validation(encoder, decoder, criterion, valid_loader, word_map, 
             caplens = caplens.to(device)
             
             imgs = encoder(imgs)
-            scores, caps_sorted, decode_lengths, alphas, sort_ind = decoder(imgs, caps, caplens, teacher_forcing_ratio=0.0)
+            scores, caps_sorted, decode_lengths, alphas, sort_ind = decoder(imgs, caps, caplens, teacher_forcing_ratio=0.2)
             
             targets = caps_sorted[:, 1:]
             
