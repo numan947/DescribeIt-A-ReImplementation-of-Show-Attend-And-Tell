@@ -15,7 +15,8 @@ from apex import amp
 from nltk.translate.bleu_score import corpus_bleu
 from nltk.translate.meteor_score import meteor_score
 import sys
-import visdom
+
+np.set_printoptions(threshold=sys.maxsize)
 
 def plot_grad_flow(named_parameters):
     ave_grads = []
@@ -44,8 +45,25 @@ def set_lr(optimizer, lr):
     return optimizer
 
 def get_lr(optimizer):
+    lrs = []
     for param_group in optimizer.param_groups:
-        return param_group['lr']
+        lrs.append(param_group['lr'])
+    return lrs
+
+def get_eps(optimizer):
+    eps = []
+    for param_group in optimizer.param_groups:
+        eps.append(param_group['eps'])
+    return eps
+
+def set_eps(optimizer, eps_val):
+    for param_group in optimizer.param_groups:
+        param_group['eps'] = eps_val
+
+
+def set_optimizer_opt(optimizer, opt, val):
+    for param_group in optimizer.param_groups:
+        param_group[opt] = val
 
 def clear_cuda():
     torch.cuda.empty_cache()
@@ -134,22 +152,13 @@ class EarlyStopping:
         self.val_best = new_best
 
 
-VISDOM_PORT = 8080
-VISDOM_SERVER = "192.168.0.109"
-VISDOM = None
 
 
 
 
 
-def train(seed, data_folder, data_name, captions_per_image, min_word_freq, pretrained_embeddings=None, fine_tune_embedding=False, fine_tune_encoder = False, use_half_precision=False, half_precision_mode=None, half_precision_loss_scale="dynamic", resume=False):
-    
-    global VISDOM
-    
-    VISDOM = visdom.Visdom(server=VISDOM_SERVER, port=VISDOM_PORT)
-    
-    
-    
+
+def train(seed, data_folder, data_name, captions_per_image, min_word_freq, pretrained_embeddings=None, fine_tune_embedding=False, fine_tune_encoder = False, use_half_precision=False, half_precision_mode=None, half_precision_loss_scale="dynamic", resume=False):   
     clear_cuda()
     torch.manual_seed(seed)
     
@@ -171,17 +180,21 @@ def train(seed, data_folder, data_name, captions_per_image, min_word_freq, pretr
     
     # TRAINING PARAMS
     start_epoch = 0
-    epochs = 120
-    batch_size = 32
-    early_stopper = EarlyStopping(track="min", save_model_name=os.path.join(data_folder,"BEST_MODEL_SO_FAR.pt"), patience=15)
+    epochs = 30
+    batch_size = 64
+    early_stopper = EarlyStopping(track="min", save_model_name=os.path.join(data_folder,"BEST_MODEL_SO_FAR.pt"), patience=13)
     workers = 1
     encoder_lr = 5e-5
-    decoder_lr = 1e-3
-    grad_clip = 1.05
+    decoder_lr = 5e-4
+    encoder_eps = 1e-4
+    decoder_eps = 1e-4
+    grad_clip = 0.99
     alpha_c = 1.0
     best_bleu4 = 0.0
     checkpoint = "CHECKPOINT_{}_".format(seed)+data_name.upper()+".pt"
     history = data_name.upper()+"_SEED_{}_HISTORY.csv".format(seed)
+    
+    weight_decay = 5e-4
     
     
     
@@ -208,11 +221,11 @@ def train(seed, data_folder, data_name, captions_per_image, min_word_freq, pretr
     encoder.fine_tune(fine_tune_encoder)
     
     if not use_half_precision:
-        decoder_optimizer = torch.optim.Adam(params=filter(lambda p: p.requires_grad, decoder.parameters()), lr=decoder_lr)
-        encoder_optimizer = torch.optim.Adam(params=filter(lambda p: p.requires_grad, encoder.parameters()), lr=encoder_lr) if fine_tune_encoder else None
+        decoder_optimizer = torch.optim.Adam(params=filter(lambda p: p.requires_grad, decoder.parameters()), lr=decoder_lr, weight_decay=weight_decay)
+        encoder_optimizer = torch.optim.Adam(params=filter(lambda p: p.requires_grad, encoder.parameters()), lr=encoder_lr, weight_decay=weight_decay) if fine_tune_encoder else None
     else:
-        decoder_optimizer = apex.optimizers.FusedAdam(params=filter(lambda p: p.requires_grad, decoder.parameters()), lr=decoder_lr)
-        encoder_optimizer = apex.optimizers.FusedAdam(params=filter(lambda p: p.requires_grad, encoder.parameters()), lr=encoder_lr) if fine_tune_encoder else None
+        decoder_optimizer = apex.optimizers.FusedLAMB(params=filter(lambda p: p.requires_grad, decoder.parameters()), lr=decoder_lr, eps=decoder_eps, weight_decay=weight_decay)
+        encoder_optimizer = apex.optimizers.FusedLAMB(params=filter(lambda p: p.requires_grad, encoder.parameters()), lr=encoder_lr, eps=encoder_eps, weight_decay=weight_decay) if fine_tune_encoder else None
     
     
     encoder.to(device)
@@ -268,6 +281,32 @@ def train(seed, data_folder, data_name, captions_per_image, min_word_freq, pretr
     # print(vl, va, bleu4)
     # return
     
+    
+    # FOR SETTING EPS AND LR MANUALLY IF PROBLEM ARISES LATER
+    
+    # set_eps(decoder_optimizer, decoder_eps)
+    # if encoder_optimizer is not None:
+    #     set_eps(encoder_optimizer, encoder_eps)
+    
+    # set_lr(decoder_optimizer, decoder_lr)
+    # set_optimizer_opt(decoder_optimizer, 'weight_decay', weight_decay)
+    # if encoder_optimizer is not None:
+    #     # set_lr(encoder_optimizer, encoder_lr)
+    #     set_optimizer_opt(encoder_optimizer, 'weight_decay', weight_decay)
+    
+    
+    
+    
+    print("DECODER EPS: "+str(get_eps(decoder_optimizer)))
+    if encoder_optimizer is not None:
+        print("ENCODER EPS: "+str(get_eps(encoder_optimizer)))
+    
+    
+    print("DECODER LR: "+str(get_lr(decoder_optimizer)))
+    if encoder_optimizer is not None:
+        print("ENCODER LR: "+str(get_lr(encoder_optimizer)))
+    
+    
     start_time = time.time()
     for e in range(start_epoch, epochs):
         if early_stopper.early_stop:
@@ -276,7 +315,7 @@ def train(seed, data_folder, data_name, captions_per_image, min_word_freq, pretr
         if early_stopper.counter>0 and early_stopper.counter%5==0:
             adjust_learning_rate(decoder_optimizer, 0.5)
             if fine_tune_encoder:
-                adjust_learning_rate(encoder_optimizer, 0.1)
+                adjust_learning_rate(encoder_optimizer, 0.5)
 
         
         curt = time.time()    
@@ -318,6 +357,7 @@ def visdom_it(e, tl, vl, ta, va, bleu4):
         VISDOM.line(X=np.array([e]), Y=np.expand_dims(np.array([bleu4]), axis=0), win="BLUE Score", opts={'title':"BLEU4", 'legend':["valid-bleu"]}, update="append")     
 
 def train_single_epoch(encoder, decoder, train_loader, encoder_optimizer, decoder_optimizer, criterion, alpha_c=1.0, grad_clip=0.97, use_half_precision=False):
+    append_mode=False
     tl, ta = 0, 0 
     encoder.train()
     decoder.train()
@@ -401,6 +441,20 @@ def train_single_epoch(encoder, decoder, train_loader, encoder_optimizer, decode
         loss = criterion(scores, targets)
         loss += alpha_c*((1.0 - alphas.sum(dim=1))**2).mean()
         
+        if torch.isnan(loss).any():
+            torch.set_printoptions(profile="full")
+            print("NAN LOSS at BATCH: {}".format(i))
+            print(scores, file=open("LOSS_GRAD.txt", "w"))
+            print((alphas.sum(dim=1))**2, file=open("ALPHAS.txt", "w"))
+            for i, w in enumerate(decoder.parameters()):
+                if i==0:
+                    print(w, file=open("Decoder_params.txt", "w"))
+                else:
+                    print(w, file=open("Decoder_params.txt", "a"))
+            torch.set_printoptions(profile="default")
+            return -1
+        
+        
         # save for avg loss and accuracy
         ta += calculate_accuracy(scores, targets, 5)
         tl += loss.item()
@@ -410,8 +464,10 @@ def train_single_epoch(encoder, decoder, train_loader, encoder_optimizer, decode
         backward_fun(loss, optimizer_list)
         param_clipper_fun()        
         step_fun()
-        if i>0 and i<=16000 and i%200==0:
+        if i>0 and i<=16000 and i%250==0:
             sys.stdout.write("\rTL: {}, TA: {}\n".format(1.0*tl/(i+1), 1.0*ta/(i+1)))
+            VISDOM.text("{}|{} -- TL: {:0.7}, TA: {:0.7}\n".format(i,len(train_loader),1.0*tl/(i+1), 1.0*ta/(i+1)), win="SEMI UPDATE", append=append_mode)
+            append_mode = True
     
     return tl/len(train_loader), ta/len(train_loader)
 
@@ -439,6 +495,7 @@ def evaluate_on_validation(encoder, decoder, criterion, valid_loader, word_map, 
             
             scores = torch.nn.utils.rnn.pack_padded_sequence(scores, decode_lengths, batch_first=True).data
             targets = torch.nn.utils.rnn.pack_padded_sequence(targets, decode_lengths, batch_first=True).data
+            
             
             loss = criterion(scores, targets)
             loss = loss + alpha_c*((1.0-alphas.sum(dim=1))**2).mean()

@@ -1,10 +1,12 @@
 import torch, pickle, os, tqdm
 from nltk.translate.meteor_score import meteor_score
 import numpy as np
-
+import visdom
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 basefilename = None
-
+VISDOM_PORT = 8080
+VISDOM_SERVER = "192.168.0.109"
+VISDOM = visdom.Visdom(server=VISDOM_SERVER, port=VISDOM_PORT)
 
 def cuda(obj):
     if torch.cuda.is_available():
@@ -33,6 +35,8 @@ def prepare_embeddings(embedding_path):
         print("Loading word vectors...")
         with open(embedding_path) as f:
             lines = f.readlines()
+            if embedding_path.endswith(".vec"):
+                lines.pop(0)
             shape = len(lines[0].split(' '))-1
             for line in tqdm.tqdm(lines):
                 items = line.strip().split(' ')

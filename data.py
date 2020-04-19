@@ -146,12 +146,9 @@ class ImageCaptionDataset(Dataset):
         img = torch.FloatTensor(self.images[i//self.cpi]/255.0)
         if self.transform is not None:
             img = self.transform(img)
-        
-        all_caps = list(range(((i//self.cpi)*self.cpi),(((i//self.cpi)*self.cpi)+self.cpi)))
-        p = np.random.choice(all_caps)
-        
-        caption = torch.LongTensor(self.captions[p])
-        caplen = torch.LongTensor([self.caplens[p]])
+
+        caption = torch.LongTensor(self.captions[i])
+        caplen = torch.LongTensor([self.caplens[i]])
         
         if self.split == "TRAIN":
             return img, caption, caplen

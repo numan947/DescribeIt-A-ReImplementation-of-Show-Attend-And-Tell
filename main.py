@@ -2,7 +2,7 @@ from train import train
 from data import ImageCaptionDataset
 from models import Encoder, Decoder
 from torch.utils.data import DataLoader
-import torch
+import torch, time, datetime
 import pandas as pd
 import json, os, tqdm
 from eval import evaluate, generate_caption
@@ -61,14 +61,26 @@ def generate_stats(SEED, data_name, PRETRAINED_EMBEDDING_DIM, BEAM_SIZES = [1,3,
     df_save_name = '{}_{}_STATS.csv'.format(data_name.upper(), SEED)
     df = pd.DataFrame()
     idx = 0
+    mode = True
     
     dataset = ImageCaptionDataset(DATA_FOLDER, BASE_FILENAME, "VALID", TRANSFORMS)
     bleu = None
     for beam_size in BEAM_SIZES:
+        if VISDOM.win_exists("VALID-BLEU"):
+            mode = True
+        else:
+            mode = False
+        VISDOM.text("Beam Size: {} BLEU: ".format(beam_size), win="VALID-BLEU", append=mode, opts={'title':"VALID-BLEU"})
         df.loc[idx, "BEAM_SIZE"] = beam_size
         df.loc[idx, "DATA-SPLIT"] = "VALIDATION"
         bleu = evaluate(word_map, encoder, decoder, dataset, beam_size=beam_size, max_step=max_step)
         print(bleu)
+        
+        if VISDOM.win_exists("VALID-BLEU"):
+                mode = True
+        else:
+            mode = False
+        VISDOM.text(str(bleu), win="VALID-BLEU", append=mode, opts={'title':"VALID-BLEU"})
         for j, b in enumerate(bleu):
             df.loc[idx, "BLEU-"+str(j+1)] = b
         idx+=1
@@ -76,9 +88,19 @@ def generate_stats(SEED, data_name, PRETRAINED_EMBEDDING_DIM, BEAM_SIZES = [1,3,
     dataset = ImageCaptionDataset(DATA_FOLDER, BASE_FILENAME, "TEST", TRANSFORMS)
     bleu = None
     for beam_size in BEAM_SIZES:
+        if VISDOM.win_exists("TEST-BLEU"):
+            mode = True
+        else:
+            mode = False
+        VISDOM.text("Beam Size: {} BLEU: ".format(beam_size), win="TEST-BLEU", append=mode, opts={'title':"TEST-BLEU"})
         df.loc[idx, "BEAM_SIZE"] = beam_size
         df.loc[idx, "DATA-SPLIT"] = "TEST"
         bleu = evaluate(word_map, encoder, decoder, dataset, beam_size=beam_size, max_step=max_step)
+        if VISDOM.win_exists("TEST-BLEU"):
+            mode = True
+        else:
+            mode = False        
+        VISDOM.text(str(bleu), win="TEST-BLEU", append=mode, opts={'title':"TEST-BLEU"})
         print(bleu)
         for j, b in enumerate(bleu):
             df.loc[idx, "BLEU-"+str(j+1)] = b
@@ -123,223 +145,236 @@ def generate_captions(SEED, image_paths, data_name, PRETRAINED_EMBEDDING_DIM, BE
 
 if __name__ == "__main__":
 
-    SEED = 43
-    data_name = "FLICKR8K"
+    try:
+
+        # SEED = 43
+        # data_name = "FLICKR8K"
+        
+        # print("USING {}  -  SEED: {}".format(data_name, SEED))
+
+        
+        # if SEED == 43:
+        #     PRETRAINED_EMBEDDINGS = "/mnt/BRCD-2/Pretrained/glove.6B.300d.txt"
+        #     FINE_TUNE_EMBEDDING = False
+        #     PRETRAINED_EMBEDDING_DIM = 300
+
+        # elif SEED == 947:
+        #     PRETRAINED_EMBEDDINGS = "/mnt/BRCD-2/Pretrained/glove.6B.300d.txt"
+        #     FINE_TUNE_EMBEDDING = True
+        #     PRETRAINED_EMBEDDING_DIM = 300
+
+        # elif SEED == 94743 :
+        #     PRETRAINED_EMBEDDINGS = None
+        #     FINE_TUNE_EMBEDDING = False
+        #     PRETRAINED_EMBEDDING_DIM = 512
+
+        # train(SEED, DATA_FOLDER, data_name, CAPTIONS_PER_IMAGE, MIN_WORD_FREQ, PRETRAINED_EMBEDDINGS, FINE_TUNE_EMBEDDING, FINE_TUNE_ENCODER, USE_HALF_PRECISION, HALF_PRECISION_MODE, resume=True)
+        # generate_stats(SEED, data_name, PRETRAINED_EMBEDDING_DIM)
+        # generate_captions(SEED, "./output/very_small_test/",data_name, PRETRAINED_EMBEDDING_DIM) 
+
+        # clear_cuda()
+        # SEED = 947
+        # data_name = "FLICKR8K"
+        
+        # print("USING {}  -  SEED: {}".format(data_name, SEED))
+
+        
+        # if SEED == 43:
+        #     PRETRAINED_EMBEDDINGS = "/mnt/BRCD-2/Pretrained/glove.840B.300d.txt"
+        #     FINE_TUNE_EMBEDDING = False
+        #     PRETRAINED_EMBEDDING_DIM = 300
+
+        # elif SEED == 947:
+        #     PRETRAINED_EMBEDDINGS = "/mnt/BRCD-2/Pretrained/glove.840B.300d.txt"
+        #     FINE_TUNE_EMBEDDING = True
+        #     PRETRAINED_EMBEDDING_DIM = 300
+
+        # elif SEED == 94743:
+        #     PRETRAINED_EMBEDDINGS = None
+        #     FINE_TUNE_EMBEDDING = False
+        #     PRETRAINED_EMBEDDING_DIM = 512
+
+        
+        # train(SEED, DATA_FOLDER, data_name, CAPTIONS_PER_IMAGE, MIN_WORD_FREQ, PRETRAINED_EMBEDDINGS, FINE_TUNE_EMBEDDING, FINE_TUNE_ENCODER, USE_HALF_PRECISION, HALF_PRECISION_MODE, resume=False)
+        # generate_stats(SEED, data_name, PRETRAINED_EMBEDDING_DIM)
+        
+        # clear_cuda()
+        # SEED = 94743
+        # data_name = "FLICKR8K"
+        # print("USING {}  -  SEED: {}".format(data_name, SEED))
+        
+        # if SEED == 43:
+        #     PRETRAINED_EMBEDDINGS = "/mnt/BRCD-2/Pretrained/glove.840B.300d.txt"
+        #     FINE_TUNE_EMBEDDING = False
+        #     PRETRAINED_EMBEDDING_DIM = 300
+
+        # elif SEED == 947:
+        #     PRETRAINED_EMBEDDINGS = "/mnt/BRCD-2/Pretrained/glove.840B.300d.txt"
+        #     FINE_TUNE_EMBEDDING = True
+        #     PRETRAINED_EMBEDDING_DIM = 300
+
+        # elif SEED == 94743:
+        #     PRETRAINED_EMBEDDINGS = None
+        #     FINE_TUNE_EMBEDDING = False
+        #     PRETRAINED_EMBEDDING_DIM = 512
+
+        
+        # train(SEED, DATA_FOLDER, data_name, CAPTIONS_PER_IMAGE, MIN_WORD_FREQ, PRETRAINED_EMBEDDINGS, FINE_TUNE_EMBEDDING, FINE_TUNE_ENCODER, USE_HALF_PRECISION, HALF_PRECISION_MODE, resume=False)
+        # generate_stats(SEED, data_name, PRETRAINED_EMBEDDING_DIM)
+        
+        # clear_cuda()
+        # SEED = 43
+        # data_name = "FLICKR30K"
+        # print("USING {}  -  SEED: {}".format(data_name, SEED))
+        
+        # if SEED == 43:
+        #     PRETRAINED_EMBEDDINGS = "/mnt/BRCD-2/Pretrained/glove.840B.300d.txt"
+        #     FINE_TUNE_EMBEDDING = False
+        #     PRETRAINED_EMBEDDING_DIM = 300
+
+        # elif SEED == 947:
+        #     PRETRAINED_EMBEDDINGS = "/mnt/BRCD-2/Pretrained/glove.840B.300d.txt"
+        #     FINE_TUNE_EMBEDDING = True
+        #     PRETRAINED_EMBEDDING_DIM = 300
+
+        # elif SEED == 94743:
+        #     PRETRAINED_EMBEDDINGS = None
+        #     FINE_TUNE_EMBEDDING = False
+        #     PRETRAINED_EMBEDDING_DIM = 512
+        
+        
+        # train(SEED, DATA_FOLDER, data_name, CAPTIONS_PER_IMAGE, MIN_WORD_FREQ, PRETRAINED_EMBEDDINGS, FINE_TUNE_EMBEDDING, FINE_TUNE_ENCODER, USE_HALF_PRECISION, HALF_PRECISION_MODE, resume=False)
+        # generate_stats(SEED, data_name, PRETRAINED_EMBEDDING_DIM)
+        # generate_captions(SEED, FLICKR30K_DEMO_PATH, data_name, PRETRAINED_EMBEDDING_DIM, BEAM_SIZE=5)
+
+        # clear_cuda()
+        # SEED = 947
+        # data_name = "FLICKR30K"
+        # print("USING {}  -  SEED: {}".format(data_name, SEED))
+        
+        # if SEED == 43:
+        #     PRETRAINED_EMBEDDINGS = "/mnt/BRCD-2/Pretrained/glove.840B.300d.txt"
+        #     FINE_TUNE_EMBEDDING = False
+        #     PRETRAINED_EMBEDDING_DIM = 300
+
+        # elif SEED == 947:
+        #     PRETRAINED_EMBEDDINGS = "/mnt/BRCD-2/Pretrained/glove.840B.300d.txt"
+        #     FINE_TUNE_EMBEDDING = True
+        #     PRETRAINED_EMBEDDING_DIM = 300
+
+        # elif SEED == 94743:
+        #     PRETRAINED_EMBEDDINGS = None
+        #     FINE_TUNE_EMBEDDING = False
+        #     PRETRAINED_EMBEDDING_DIM = 512
+        
+        
+        # train(SEED, DATA_FOLDER, data_name, CAPTIONS_PER_IMAGE, MIN_WORD_FREQ, PRETRAINED_EMBEDDINGS, FINE_TUNE_EMBEDDING, FINE_TUNE_ENCODER, USE_HALF_PRECISION, HALF_PRECISION_MODE, resume=False)
+        # generate_stats(SEED, data_name, PRETRAINED_EMBEDDING_DIM)
+        # generate_captions(SEED, FLICKR30K_DEMO_PATH, data_name, PRETRAINED_EMBEDDING_DIM, BEAM_SIZE=5)
+        
+        # clear_cuda()
+        # SEED = 94743
+        # data_name = "FLICKR30K"
+        # print("USING {}  -  SEED: {}".format(data_name, SEED))
+        
+        # if SEED == 43:
+        #     PRETRAINED_EMBEDDINGS = "/mnt/BRCD-2/Pretrained/glove.840B.300d.txt"
+        #     FINE_TUNE_EMBEDDING = False
+        #     PRETRAINED_EMBEDDING_DIM = 300
+
+        # elif SEED == 947:
+        #     PRETRAINED_EMBEDDINGS = "/mnt/BRCD-2/Pretrained/glove.840B.300d.txt"
+        #     FINE_TUNE_EMBEDDING = True
+        #     PRETRAINED_EMBEDDING_DIM = 300
+
+        # elif SEED == 94743:
+        #     PRETRAINED_EMBEDDINGS = None
+        #     FINE_TUNE_EMBEDDING = False
+        #     PRETRAINED_EMBEDDING_DIM = 512
+
+        
+        # train(SEED, DATA_FOLDER, data_name, CAPTIONS_PER_IMAGE, MIN_WORD_FREQ, PRETRAINED_EMBEDDINGS, FINE_TUNE_EMBEDDING, FINE_TUNE_ENCODER, USE_HALF_PRECISION, HALF_PRECISION_MODE, resume=False)
+        # generate_stats(SEED, data_name, PRETRAINED_EMBEDDING_DIM)
+        
+        clear_cuda()
+        SEED = 43
+        data_name = "COCO"
+        print("USING {}  -  SEED: {}".format(data_name, SEED))
+        
+        if SEED == 43:
+            PRETRAINED_EMBEDDINGS = "/mnt/BRCD-2/Pretrained/crawl-300d-2M.vec"
+            FINE_TUNE_EMBEDDING = False
+            PRETRAINED_EMBEDDING_DIM = 300
+
+        elif SEED == 947:
+            PRETRAINED_EMBEDDINGS = "/mnt/BRCD-2/Pretrained/glove.840B.300d.txt"
+            FINE_TUNE_EMBEDDING = True
+            PRETRAINED_EMBEDDING_DIM = 300
+
+        elif SEED == 94743:
+            PRETRAINED_EMBEDDINGS = None
+            FINE_TUNE_EMBEDDING = False
+            PRETRAINED_EMBEDDING_DIM = 512
+
+        clear_cuda()
+        # train(SEED, DATA_FOLDER, data_name, CAPTIONS_PER_IMAGE, MIN_WORD_FREQ, PRETRAINED_EMBEDDINGS, FINE_TUNE_EMBEDDING, FINE_TUNE_ENCODER, USE_HALF_PRECISION, HALF_PRECISION_MODE, resume=True)
+        generate_stats(SEED, data_name, PRETRAINED_EMBEDDING_DIM)
+        # generate_captions(SEED, COCO_DEMO_PATH, data_name, PRETRAINED_EMBEDDING_DIM, BEAM_SIZE=5)
+        
+        
+        # SEED = 947
+        # data_name = "COCO"
+        # print("USING {}  -  SEED: {}".format(data_name, SEED))
+        
+        # if SEED == 43:
+        #     PRETRAINED_EMBEDDINGS = "/mnt/BRCD-2/Pretrained/glove.840B.300d.txt"
+        #     FINE_TUNE_EMBEDDING = False
+        #     PRETRAINED_EMBEDDING_DIM = 300
+
+        # elif SEED == 947:
+        #     PRETRAINED_EMBEDDINGS = "/mnt/BRCD-2/Pretrained/glove.840B.300d.txt"
+        #     FINE_TUNE_EMBEDDING = True
+        #     PRETRAINED_EMBEDDING_DIM = 300
+
+        # elif SEED == 94743:
+        #     PRETRAINED_EMBEDDINGS = None
+        #     FINE_TUNE_EMBEDDING = False
+        #     PRETRAINED_EMBEDDING_DIM = 512
+
+        
+        # train(SEED, DATA_FOLDER, data_name, CAPTIONS_PER_IMAGE, MIN_WORD_FREQ, PRETRAINED_EMBEDDINGS, FINE_TUNE_EMBEDDING, FINE_TUNE_ENCODER, USE_HALF_PRECISION, HALF_PRECISION_MODE, resume=True)
+        # generate_stats(SEED, data_name, PRETRAINED_EMBEDDING_DIM)
+        
+        # clear_cuda()
+        # SEED = 94743
+        # data_name = "COCO"
+        # print("USING {}  -  SEED: {}".format(data_name, SEED))
+        
+        # if SEED == 43:
+        #     PRETRAINED_EMBEDDINGS = "/mnt/BRCD-2/Pretrained/glove.840B.300d.txt"
+        #     FINE_TUNE_EMBEDDING = False
+        #     PRETRAINED_EMBEDDING_DIM = 300
+
+        # elif SEED == 947:
+        #     PRETRAINED_EMBEDDINGS = "/mnt/BRCD-2/Pretrained/glove.840B.300d.txt"
+        #     FINE_TUNE_EMBEDDING = True
+        #     PRETRAINED_EMBEDDING_DIM = 300
+
+        # elif SEED == 94743:
+        #     PRETRAINED_EMBEDDINGS = None
+        #     FINE_TUNE_EMBEDDING = False
+        #     PRETRAINED_EMBEDDING_DIM = 512
+
+        
+        # train(SEED, DATA_FOLDER, data_name, CAPTIONS_PER_IMAGE, MIN_WORD_FREQ, PRETRAINED_EMBEDDINGS, FINE_TUNE_EMBEDDING, FINE_TUNE_ENCODER, USE_HALF_PRECISION, HALF_PRECISION_MODE, resume=True)
+        # generate_stats(SEED, data_name, PRETRAINED_EMBEDDING_DIM)
     
-    print("USING {}  -  SEED: {}".format(data_name, SEED))
+    except (Exception, KeyboardInterrupt) as e:
+        print(e)
+        mode = False
+        if VISDOM.win_exists(win="ERROR"):
+            mode = True
+        VISDOM.text("CRASHED or Closed at "+str(datetime.datetime.fromtimestamp(time.time())), win="ERROR", append=mode, opts={'title':"Errors"})
+        raise e
 
-    
-    if SEED == 43:
-        PRETRAINED_EMBEDDINGS = "/mnt/BRCD-2/Pretrained/glove.840B.300d.txt"
-        FINE_TUNE_EMBEDDING = False
-        PRETRAINED_EMBEDDING_DIM = 300
-
-    elif SEED == 947:
-        PRETRAINED_EMBEDDINGS = "/mnt/BRCD-2/Pretrained/glove.840B.300d.txt"
-        FINE_TUNE_EMBEDDING = True
-        PRETRAINED_EMBEDDING_DIM = 300
-
-    elif SEED == 94743 :
-        PRETRAINED_EMBEDDINGS = None
-        FINE_TUNE_EMBEDDING = False
-        PRETRAINED_EMBEDDING_DIM = 512
-
-    train(SEED, DATA_FOLDER, data_name, CAPTIONS_PER_IMAGE, MIN_WORD_FREQ, PRETRAINED_EMBEDDINGS, FINE_TUNE_EMBEDDING, FINE_TUNE_ENCODER, USE_HALF_PRECISION, HALF_PRECISION_MODE, resume=True)
-    generate_stats(SEED, data_name, PRETRAINED_EMBEDDING_DIM)
-
-    # clear_cuda()
-    # SEED = 947
-    # data_name = "FLICKR8K"
-    
-    # print("USING {}  -  SEED: {}".format(data_name, SEED))
-
-    
-    # if SEED == 43:
-    #     PRETRAINED_EMBEDDINGS = "/mnt/BRCD-2/Pretrained/glove.840B.300d.txt"
-    #     FINE_TUNE_EMBEDDING = False
-    #     PRETRAINED_EMBEDDING_DIM = 300
-
-    # elif SEED == 947:
-    #     PRETRAINED_EMBEDDINGS = "/mnt/BRCD-2/Pretrained/glove.840B.300d.txt"
-    #     FINE_TUNE_EMBEDDING = True
-    #     PRETRAINED_EMBEDDING_DIM = 300
-
-    # elif SEED == 94743:
-    #     PRETRAINED_EMBEDDINGS = None
-    #     FINE_TUNE_EMBEDDING = False
-    #     PRETRAINED_EMBEDDING_DIM = 512
-
-    
-    # train(SEED, DATA_FOLDER, data_name, CAPTIONS_PER_IMAGE, MIN_WORD_FREQ, PRETRAINED_EMBEDDINGS, PRETRAINED_EMBEDDING_DIM, FINE_TUNE_EMBEDDING, FINE_TUNE_ENCODER, USE_HALF_PRECISION, HALF_PRECISION_MODE, resume=True)
-    # generate_stats(SEED, data_name, PRETRAINED_EMBEDDING_DIM)
-    
-    # clear_cuda()
-    # SEED = 43
-    # data_name = "FLICKR8K"
-    # print("USING {}  -  SEED: {}".format(data_name, SEED))
-    
-    # if SEED == 43:
-    #     PRETRAINED_EMBEDDINGS = "/mnt/BRCD-2/Pretrained/glove.840B.300d.txt"
-    #     FINE_TUNE_EMBEDDING = False
-    #     PRETRAINED_EMBEDDING_DIM = 300
-
-    # elif SEED == 947:
-    #     PRETRAINED_EMBEDDINGS = "/mnt/BRCD-2/Pretrained/glove.840B.300d.txt"
-    #     FINE_TUNE_EMBEDDING = True
-    #     PRETRAINED_EMBEDDING_DIM = 300
-
-    # elif SEED == 94743:
-    #     PRETRAINED_EMBEDDINGS = None
-    #     FINE_TUNE_EMBEDDING = False
-    #     PRETRAINED_EMBEDDING_DIM = 512
-
-    
-    # train(SEED, DATA_FOLDER, data_name, CAPTIONS_PER_IMAGE, MIN_WORD_FREQ, PRETRAINED_EMBEDDINGS, PRETRAINED_EMBEDDING_DIM, FINE_TUNE_EMBEDDING, FINE_TUNE_ENCODER, USE_HALF_PRECISION, HALF_PRECISION_MODE, resume=False)
-    # generate_stats(SEED, data_name, PRETRAINED_EMBEDDING_DIM)
-    
-    # clear_cuda()
-    # SEED = 43
-    # data_name = "FLICKR30K"
-    # print("USING {}  -  SEED: {}".format(data_name, SEED))
-    
-    # if SEED == 43:
-    #     PRETRAINED_EMBEDDINGS = "/mnt/BRCD-2/Pretrained/glove.840B.300d.txt"
-    #     FINE_TUNE_EMBEDDING = False
-    #     PRETRAINED_EMBEDDING_DIM = 300
-
-    # elif SEED == 947:
-    #     PRETRAINED_EMBEDDINGS = "/mnt/BRCD-2/Pretrained/glove.840B.300d.txt"
-    #     FINE_TUNE_EMBEDDING = True
-    #     PRETRAINED_EMBEDDING_DIM = 300
-
-    # elif SEED == 94743:
-    #     PRETRAINED_EMBEDDINGS = None
-    #     FINE_TUNE_EMBEDDING = False
-    #     PRETRAINED_EMBEDDING_DIM = 512
-    
-    
-    # train(SEED, DATA_FOLDER, data_name, CAPTIONS_PER_IMAGE, MIN_WORD_FREQ, PRETRAINED_EMBEDDINGS, PRETRAINED_EMBEDDING_DIM, FINE_TUNE_EMBEDDING, FINE_TUNE_ENCODER, USE_HALF_PRECISION, HALF_PRECISION_MODE, resume=False)
-    # generate_stats(SEED, data_name, PRETRAINED_EMBEDDING_DIM)
-    # generate_captions(SEED, FLICKR30K_DEMO_PATH, data_name, PRETRAINED_EMBEDDING_DIM, BEAM_SIZE=5)
-
-    # clear_cuda()
-    # SEED = 947
-    # data_name = "FLICKR30K"
-    # print("USING {}  -  SEED: {}".format(data_name, SEED))
-    
-    # if SEED == 43:
-    #     PRETRAINED_EMBEDDINGS = "/mnt/BRCD-2/Pretrained/glove.840B.300d.txt"
-    #     FINE_TUNE_EMBEDDING = False
-    #     PRETRAINED_EMBEDDING_DIM = 300
-
-    # elif SEED == 947:
-    #     PRETRAINED_EMBEDDINGS = "/mnt/BRCD-2/Pretrained/glove.840B.300d.txt"
-    #     FINE_TUNE_EMBEDDING = True
-    #     PRETRAINED_EMBEDDING_DIM = 300
-
-    # elif SEED == 94743:
-    #     PRETRAINED_EMBEDDINGS = None
-    #     FINE_TUNE_EMBEDDING = False
-    #     PRETRAINED_EMBEDDING_DIM = 512
-    
-    
-    # train(SEED, DATA_FOLDER, data_name, CAPTIONS_PER_IMAGE, MIN_WORD_FREQ, PRETRAINED_EMBEDDINGS, PRETRAINED_EMBEDDING_DIM, FINE_TUNE_EMBEDDING, FINE_TUNE_ENCODER, USE_HALF_PRECISION, HALF_PRECISION_MODE, resume=False)
-    # generate_stats(SEED, data_name, PRETRAINED_EMBEDDING_DIM)
-    # generate_captions(SEED, FLICKR30K_DEMO_PATH, data_name, PRETRAINED_EMBEDDING_DIM, BEAM_SIZE=5)
-    
-    # clear_cuda()
-    # SEED = 94743
-    # data_name = "FLICKR30K"
-    # print("USING {}  -  SEED: {}".format(data_name, SEED))
-    
-    # if SEED == 43:
-    #     PRETRAINED_EMBEDDINGS = "/mnt/BRCD-2/Pretrained/glove.840B.300d.txt"
-    #     FINE_TUNE_EMBEDDING = False
-    #     PRETRAINED_EMBEDDING_DIM = 300
-
-    # elif SEED == 947:
-    #     PRETRAINED_EMBEDDINGS = "/mnt/BRCD-2/Pretrained/glove.840B.300d.txt"
-    #     FINE_TUNE_EMBEDDING = True
-    #     PRETRAINED_EMBEDDING_DIM = 300
-
-    # elif SEED == 94743:
-    #     PRETRAINED_EMBEDDINGS = None
-    #     FINE_TUNE_EMBEDDING = False
-    #     PRETRAINED_EMBEDDING_DIM = 512
-
-    
-    # train(SEED, DATA_FOLDER, data_name, CAPTIONS_PER_IMAGE, MIN_WORD_FREQ, PRETRAINED_EMBEDDINGS, PRETRAINED_EMBEDDING_DIM, FINE_TUNE_EMBEDDING, FINE_TUNE_ENCODER, USE_HALF_PRECISION, HALF_PRECISION_MODE, resume=False)
-    # generate_stats(SEED, data_name, PRETRAINED_EMBEDDING_DIM)
-    
-    # clear_cuda()
-    # SEED = 43
-    # data_name = "COCO"
-    # print("USING {}  -  SEED: {}".format(data_name, SEED))
-    
-    # if SEED == 43:
-    #     PRETRAINED_EMBEDDINGS = "/mnt/BRCD-2/Pretrained/glove.840B.300d.txt"
-    #     FINE_TUNE_EMBEDDING = False
-    #     PRETRAINED_EMBEDDING_DIM = 300
-
-    # elif SEED == 947:
-    #     PRETRAINED_EMBEDDINGS = "/mnt/BRCD-2/Pretrained/glove.840B.300d.txt"
-    #     FINE_TUNE_EMBEDDING = True
-    #     PRETRAINED_EMBEDDING_DIM = 300
-
-    # elif SEED == 94743:
-    #     PRETRAINED_EMBEDDINGS = None
-    #     FINE_TUNE_EMBEDDING = False
-    #     PRETRAINED_EMBEDDING_DIM = 512
-
-    # clear_cuda()
-    # train(SEED, DATA_FOLDER, data_name, CAPTIONS_PER_IMAGE, MIN_WORD_FREQ, PRETRAINED_EMBEDDINGS, PRETRAINED_EMBEDDING_DIM, FINE_TUNE_EMBEDDING, FINE_TUNE_ENCODER, USE_HALF_PRECISION, HALF_PRECISION_MODE, resume=True)
-    # generate_stats(SEED, data_name, PRETRAINED_EMBEDDING_DIM)
-    # generate_captions(SEED, COCO_DEMO_PATH, data_name, PRETRAINED_EMBEDDING_DIM, BEAM_SIZE=5)
-    
-    
-    # SEED = 947
-    # data_name = "COCO"
-    # print("USING {}  -  SEED: {}".format(data_name, SEED))
-    
-    # if SEED == 43:
-    #     PRETRAINED_EMBEDDINGS = "/mnt/BRCD-2/Pretrained/glove.840B.300d.txt"
-    #     FINE_TUNE_EMBEDDING = False
-    #     PRETRAINED_EMBEDDING_DIM = 300
-
-    # elif SEED == 947:
-    #     PRETRAINED_EMBEDDINGS = "/mnt/BRCD-2/Pretrained/glove.840B.300d.txt"
-    #     FINE_TUNE_EMBEDDING = True
-    #     PRETRAINED_EMBEDDING_DIM = 300
-
-    # elif SEED == 94743:
-    #     PRETRAINED_EMBEDDINGS = None
-    #     FINE_TUNE_EMBEDDING = False
-    #     PRETRAINED_EMBEDDING_DIM = 512
-
-    
-    # train(SEED, DATA_FOLDER, data_name, CAPTIONS_PER_IMAGE, MIN_WORD_FREQ, PRETRAINED_EMBEDDINGS, PRETRAINED_EMBEDDING_DIM, FINE_TUNE_EMBEDDING, FINE_TUNE_ENCODER, USE_HALF_PRECISION, HALF_PRECISION_MODE, resume=False)
-    # generate_stats(SEED, data_name, PRETRAINED_EMBEDDING_DIM)
-    
-    # clear_cuda()
-    # SEED = 94743
-    # data_name = "COCO"
-    # print("USING {}  -  SEED: {}".format(data_name, SEED))
-    
-    # if SEED == 43:
-    #     PRETRAINED_EMBEDDINGS = "/mnt/BRCD-2/Pretrained/glove.840B.300d.txt"
-    #     FINE_TUNE_EMBEDDING = False
-    #     PRETRAINED_EMBEDDING_DIM = 300
-
-    # elif SEED == 947:
-    #     PRETRAINED_EMBEDDINGS = "/mnt/BRCD-2/Pretrained/glove.840B.300d.txt"
-    #     FINE_TUNE_EMBEDDING = True
-    #     PRETRAINED_EMBEDDING_DIM = 300
-
-    # elif SEED == 94743:
-    #     PRETRAINED_EMBEDDINGS = None
-    #     FINE_TUNE_EMBEDDING = False
-    #     PRETRAINED_EMBEDDING_DIM = 512
-
-    
-    # train(SEED, DATA_FOLDER, data_name, CAPTIONS_PER_IMAGE, MIN_WORD_FREQ, PRETRAINED_EMBEDDINGS, PRETRAINED_EMBEDDING_DIM, FINE_TUNE_EMBEDDING, FINE_TUNE_ENCODER, USE_HALF_PRECISION, HALF_PRECISION_MODE, resume=False)
-    # generate_stats(SEED, data_name, PRETRAINED_EMBEDDING_DIM)
+    VISDOM.text("Training Completed at "+str(datetime.datetime.fromtimestamp(time.time())), win="FINISHED", opts={'title':"FINISHED"})
