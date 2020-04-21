@@ -190,8 +190,19 @@ def evaluate(word_map, encoder, decoder, dataset, beam_size, max_step=50):
         return all_bleu, meteor_score, rouge_score, cider_score, spice_score
 
 
-def visualize_attention(seed, image_path, seq, alphas, rev_wordmap, smooth=True, max_step=50):
-    save_path = os.path.abspath(image_path).split(".")[0]+"_SEED_{}_ANNOTATED.jpg".format(seed)
+def visualize_attention(seed, image_path, seq, alphas, rev_wordmap, smooth=True, max_step=50):    
+    
+    parent_folder = os.path.abspath(image_path).split("/")[:-1]
+    new_folder = str(seed)
+    save_folder = os.path.join("/".join(parent_folder), new_folder)
+    os.makedirs(save_folder, exist_ok=True)
+    
+    print(save_folder)
+    
+    save_path = os.path.abspath(image_path).split("/")[-1].split(".")[0]+"_SEED_{}_ANNOTATED.jpg".format(seed)
+    save_path = os.path.join(save_folder, save_path)
+    
+    
     UPSAMPLE_SIZE = 16 # original model's input size was 224X224
     image = Image.open(image_path)
     image = image.resize([14*UPSAMPLE_SIZE,14*UPSAMPLE_SIZE], Image.LANCZOS)

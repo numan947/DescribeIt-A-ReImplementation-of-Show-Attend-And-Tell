@@ -128,6 +128,7 @@ def generate_stats(SEED, data_name, PRETRAINED_EMBEDDING_DIM, BEAM_SIZES = [1,3,
 
 
 def generate_captions(SEED, image_paths, data_name, PRETRAINED_EMBEDDING_DIM, BEAM_SIZE = 5, max_step=200):
+    image_paths = os.path.abspath(image_paths)
     ENCODER_STATE_FILE = DATA_FOLDER+"ENCODER_STATE_{}_".format(SEED)+data_name.upper()+".pt"
     DECODER_STATE_FILE = DATA_FOLDER+"DECODER_STATE_{}_".format(SEED)+data_name.upper()+".pt"
     BASE_FILENAME = data_name.lower()+"_"+str(CAPTIONS_PER_IMAGE)+"_cap_per_img_"+str(MIN_WORD_FREQ)+"_min_word_freq"
@@ -144,8 +145,8 @@ def generate_captions(SEED, image_paths, data_name, PRETRAINED_EMBEDDING_DIM, BE
     encoder.load_state_dict(torch.load(ENCODER_STATE_FILE))
     decoder.load_state_dict(torch.load(DECODER_STATE_FILE))
     
-    all_images_jpg = glob(image_paths+"*.jpg")
-    all_images_png = glob(image_paths+"*.png")
+    all_images_jpg = glob(os.path.join(image_paths, "*.jpg"))
+    all_images_png = glob(os.path.join(image_paths, "*.png"))
     
     all_images = all_images_jpg+all_images_png
     
@@ -157,7 +158,7 @@ if __name__ == "__main__":
     # <SEED> <DATANAME> <TRAIN MODE> <RESUME> <STATS MODE>
     try:
         
-        assert len(sys.argv) == 6
+        assert len(sys.argv) == 7
         
         print(sys.argv)
         
@@ -166,6 +167,7 @@ if __name__ == "__main__":
         train_mode = (sys.argv[3].lower() == "true") # train or evaluate
         resume = (sys.argv[4].lower() == "true") # if train resume or not
         stats_mode = sys.argv[5].lower() # whether to generate stats of the best model or the possibly overfitted model: "best" or "latest"
+        create_captions = (sys.argv[6] == "true")
         
         print("RESUME?? -->", resume)
         print("USING {}  -  SEED: {}".format(data_name, SEED))
@@ -188,8 +190,13 @@ if __name__ == "__main__":
 
         if train_mode:
             train(SEED, DATA_FOLDER, data_name, CAPTIONS_PER_IMAGE, MIN_WORD_FREQ, PRETRAINED_EMBEDDINGS, FINE_TUNE_EMBEDDING, FINE_TUNE_ENCODER, USE_HALF_PRECISION, HALF_PRECISION_MODE, resume=resume)
-        generate_stats(SEED, data_name, PRETRAINED_EMBEDDING_DIM, stats_mode=stats_mode)
-        # generate_captions(SEED, "./output/very_small_test/",data_name, PRETRAINED_EMBEDDING_DIM) 
+        
+        if stats_mode == "best" or stats_mode == "latest":
+            generate_stats(SEED, data_name, PRETRAINED_EMBEDDING_DIM, stats_mode=stats_mode)
+        
+        print("GENERATE CAPTIONS ==>", create_captions)
+        if create_captions:
+            generate_captions(SEED, "./demo/"+data_name.lower(),data_name, PRETRAINED_EMBEDDING_DIM) 
         
         
     except (Exception, KeyboardInterrupt) as e:
