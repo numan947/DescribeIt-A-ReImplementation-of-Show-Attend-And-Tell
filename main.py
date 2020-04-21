@@ -42,9 +42,22 @@ COCO_DEMO_PATH = "./demo/coco/"
 STATS_PATH = "./stats/"
 
 
-def generate_stats(SEED, data_name, PRETRAINED_EMBEDDING_DIM, BEAM_SIZES = [1,3,5,7], max_step=200):
-    ENCODER_STATE_FILE = DATA_FOLDER+"ENCODER_STATE_{}_".format(SEED)+data_name.upper()+".pt"
-    DECODER_STATE_FILE = DATA_FOLDER+"DECODER_STATE_{}_".format(SEED)+data_name.upper()+".pt"
+def generate_stats(SEED, data_name, PRETRAINED_EMBEDDING_DIM, BEAM_SIZES = [1,3,5,7],stats_mode="best", max_step=200):
+    
+    assert stats_mode in {"best", "latest"}
+    print("STATS MODE {}".format(stats_mode))
+    if stats_mode == "best":
+        ENCODER_STATE_FILE = DATA_FOLDER+"ENCODER_STATE_{}_".format(SEED)+data_name.upper()+".pt"
+        DECODER_STATE_FILE = DATA_FOLDER+"DECODER_STATE_{}_".format(SEED)+data_name.upper()+".pt"
+        encoder_state = torch.load(ENCODER_STATE_FILE)
+        decoder_state = torch.load(DECODER_STATE_FILE)
+    else:
+        state_file = os.path.join(DATA_FOLDER, "CHECKPOINT_{}_".format(SEED)+data_name.upper()+".pt")
+        state = torch.load(state_file)
+        encoder_state = state['encoder_state']
+        decoder_state = state['decoder_state']
+    
+    
     BASE_FILENAME = data_name.lower()+"_"+str(CAPTIONS_PER_IMAGE)+"_cap_per_img_"+str(MIN_WORD_FREQ)+"_min_word_freq"
     
     word_map_file = os.path.join(DATA_FOLDER, 'WORDMAP_'+BASE_FILENAME+".json")
@@ -56,10 +69,10 @@ def generate_stats(SEED, data_name, PRETRAINED_EMBEDDING_DIM, BEAM_SIZES = [1,3,
     encoder = Encoder(fine_tune=False)
     decoder = Decoder(512, PRETRAINED_EMBEDDING_DIM ,512, vocab_size)
     
-    encoder.load_state_dict(torch.load(ENCODER_STATE_FILE))
-    decoder.load_state_dict(torch.load(DECODER_STATE_FILE))
+    encoder.load_state_dict(encoder_state)
+    decoder.load_state_dict(decoder_state)
     
-    df_save_name = os.path.join(STATS_PATH, '{}_{}_STATS.csv'.format(data_name.upper(), SEED))
+    df_save_name = os.path.join(STATS_PATH, '{}_{}_{}_STATS.csv'.format(data_name.upper(), SEED, stats_mode))
     df = pd.DataFrame()
     idx = 0
         
@@ -141,16 +154,18 @@ def generate_captions(SEED, image_paths, data_name, PRETRAINED_EMBEDDING_DIM, BE
 
 
 if __name__ == "__main__":
-
+    # <SEED> <DATANAME> <TRAIN MODE> <RESUME> <STATS MODE>
     try:
         
-        assert len(sys.argv) == 4
+        assert len(sys.argv) == 6
         
         print(sys.argv)
         
-        SEED = int(sys.argv[1])
-        data_name = sys.argv[2]
-        resume = sys.argv[3].lower() == "true" 
+        SEED = int(sys.argv[1]) # 43, 947 or 94743 for pretrained_embeddings_without_fine_tune | pretrained_embeddings_with_fine_tune | no_pretrained_embeddings
+        data_name = sys.argv[2] # COCO, FLICKR8K or FLICKR30K
+        train_mode = (sys.argv[3].lower() == "true") # train or evaluate
+        resume = (sys.argv[4].lower() == "true") # if train resume or not
+        stats_mode = sys.argv[5].lower() # whether to generate stats of the best model or the possibly overfitted model: "best" or "latest"
         
         print("RESUME?? -->", resume)
         print("USING {}  -  SEED: {}".format(data_name, SEED))
@@ -171,8 +186,9 @@ if __name__ == "__main__":
             FINE_TUNE_EMBEDDING = False
             PRETRAINED_EMBEDDING_DIM = 512
 
-        train(SEED, DATA_FOLDER, data_name, CAPTIONS_PER_IMAGE, MIN_WORD_FREQ, PRETRAINED_EMBEDDINGS, FINE_TUNE_EMBEDDING, FINE_TUNE_ENCODER, USE_HALF_PRECISION, HALF_PRECISION_MODE, resume=resume)
-        generate_stats(SEED, data_name, PRETRAINED_EMBEDDING_DIM)
+        if train_mode:
+            train(SEED, DATA_FOLDER, data_name, CAPTIONS_PER_IMAGE, MIN_WORD_FREQ, PRETRAINED_EMBEDDINGS, FINE_TUNE_EMBEDDING, FINE_TUNE_ENCODER, USE_HALF_PRECISION, HALF_PRECISION_MODE, resume=resume)
+        generate_stats(SEED, data_name, PRETRAINED_EMBEDDING_DIM, stats_mode=stats_mode)
         # generate_captions(SEED, "./output/very_small_test/",data_name, PRETRAINED_EMBEDDING_DIM) 
         
         
