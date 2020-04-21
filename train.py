@@ -421,7 +421,7 @@ def train_single_epoch(encoder, decoder, train_loader, encoder_optimizer, decode
         optimizer_list = decoder_optimizer
  
  
-    for i, (imgs, caps, caplens) in enumerate(tqdm.tqdm(train_loader, total=len(train_loader))):
+    for i, (img_id, imgs, caps, caplens) in enumerate(tqdm.tqdm(train_loader, total=len(train_loader))):
         
         # data to gpu
         imgs = imgs.to(device)
@@ -481,7 +481,7 @@ def evaluate_on_validation(encoder, decoder, criterion, valid_loader, word_map, 
     hypotheses = list()
 
     with torch.no_grad():
-        for i, (imgs, caps, caplens, allcaps) in enumerate(tqdm.tqdm(valid_loader, total=len(valid_loader))):
+        for i, (img_id, imgs, caps, caplens, allcaps) in enumerate(tqdm.tqdm(valid_loader, total=len(valid_loader))):
             imgs = imgs.to(device)
             caps = caps.to(device)
             caplens = caplens.to(device)

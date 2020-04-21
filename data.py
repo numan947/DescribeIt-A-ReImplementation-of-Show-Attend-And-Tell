@@ -1,4 +1,4 @@
-import json, os, random, h5py, tqdm
+import json, os, random, h5py, tqdm, ast
 from collections import Counter
 from PIL import Image
 import numpy as np
@@ -12,6 +12,11 @@ def parse_and_prepare_data(dataset, karpathy_json_path, image_folder, captions_p
     with open(karpathy_json_path, 'r') as j:
         karpathy_data = json.load(j)
     
+    GTS = {}
+    
+    trn_image_ids = []
+    vld_image_ids = []
+    tst_image_ids = []
     trn_image_paths = []
     vld_image_paths = []
     tst_image_paths = []
@@ -23,30 +28,35 @@ def parse_and_prepare_data(dataset, karpathy_json_path, image_folder, captions_p
     
     print("READING CAPTIONS.....")
     for img in tqdm.tqdm(karpathy_data["images"]):
+        image_id = img['imgid']
         captions = []
         for c in img['sentences']:
             word_freq.update(c['tokens'])
             if len(c['tokens']) <= max_len:
                 captions.append(c['tokens'])
-
+                if image_id not in GTS.keys():
+                    GTS[image_id] = []
+                GTS[image_id].append(' '.join(c['tokens']))
         if len(captions) == 0:
             continue
-            
         
         path = os.path.join(image_folder, img['filepath'], img['filename']) if dataset == 'coco' else os.path.join(image_folder, img['filename'])
         
-        
         if img['split'] in {'train', 'restval'}:
+            trn_image_ids.append(image_id)
             trn_image_paths.append(path)
             trn_image_captions.append(captions)
         
         elif img['split'] in {'val'}:
+            vld_image_ids.append(image_id)
             vld_image_captions.append(captions)
             vld_image_paths.append(path)
         elif img['split'] in {'test'}:
+            tst_image_ids.append(image_id)
             tst_image_paths.append(path)
             tst_image_captions.append(captions)
-    
+
+    print(GTS, file=open(os.path.join(output_folder, dataset.upper()+"_"+"GTS.txt"), "w+"))
     
     assert len(trn_image_captions) == len(trn_image_paths)
     assert len(vld_image_captions) == len(vld_image_paths)
@@ -68,6 +78,11 @@ def parse_and_prepare_data(dataset, karpathy_json_path, image_folder, captions_p
     
     
     random.seed(947)
+    
+    print(trn_image_ids,file=open(os.path.join(output_folder, dataset.upper()+"_"+"TRAIN_IMG_IDS.txt"), "w+"))
+    print(vld_image_ids,file=open(os.path.join(output_folder, dataset.upper()+"_"+"VALID_IMG_IDS.txt"), "w+"))
+    print(tst_image_ids,file=open(os.path.join(output_folder, dataset.upper()+"_"+"TEST_IMG_IDS.txt"), "w+"))
+    
     
     for img, cap, split in [(trn_image_paths, trn_image_captions, "TRAIN"), (vld_image_paths, vld_image_captions, "VALID"), (tst_image_paths, tst_image_captions, "TEST")]:
         
@@ -122,10 +137,15 @@ class ImageCaptionDataset(Dataset):
         self.split = split.upper()
         assert self.split in {"TRAIN", "TEST", "VALID"}
         
+        self.dataset_name = base_filename.split("_")[0].upper()
         
         self.h = h5py.File(os.path.join(data_folder, self.split+"_IMAGES_"+base_filename+".hdf5"), 'r')
         
         self.images = self.h['images']
+        self.image_ids =  os.path.join(data_folder,self.dataset_name+"_"+self.split+"_IMG_IDS.txt")
+        
+        with open(self.image_ids, "r") as f:
+            self.image_ids = ast.literal_eval(f.read())
         
         self.cpi = self.h.attrs['captions_per_image']
         
@@ -138,12 +158,15 @@ class ImageCaptionDataset(Dataset):
         self.transform = transform
         
         self.dataset_size = len(self.captions)
+        
     
     def __len__(self):
         return self.dataset_size
     
     def __getitem__(self, i):
-        img = torch.FloatTensor(self.images[i//self.cpi]/255.0)
+        img_i = i//self.cpi
+        img = torch.FloatTensor(self.images[img_i]/255.0)
+        img_id = self.image_ids[img_i]
         if self.transform is not None:
             img = self.transform(img)
 
@@ -151,12 +174,12 @@ class ImageCaptionDataset(Dataset):
         caplen = torch.LongTensor([self.caplens[i]])
         
         if self.split == "TRAIN":
-            return img, caption, caplen
+            return img_id, img, caption, caplen
         else:
             all_captions = torch.LongTensor(
                 self.captions[((i//self.cpi)*self.cpi):(((i//self.cpi)*self.cpi)+self.cpi)]
             )
-            return img, caption, caplen, all_captions
+            return img_id, img, caption, caplen, all_captions
 
 
 if __name__ == "__main__":

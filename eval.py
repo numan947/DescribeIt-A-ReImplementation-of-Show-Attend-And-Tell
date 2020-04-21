@@ -2,8 +2,6 @@ from commons import *
 from torch.utils.data import DataLoader
 from torchvision.transforms import transforms
 import tqdm, os
-from nltk.translate.bleu_score import corpus_bleu
-from nltk.translate.meteor_score import meteor_score
 from PIL import Image
 
 import matplotlib.cm as cm
@@ -11,6 +9,12 @@ import matplotlib.pyplot as plt
 import numpy as np
 from skimage import transform as trxf
 
+
+from bleu.bleu import Bleu
+from meteor.meteor import Meteor
+from rouge.rouge import Rouge
+from cider.cider import Cider
+from spice.spice import Spice
 
 
 def beam_search(encoder, decoder, image, word_map, beam_size, max_step):
@@ -119,9 +123,10 @@ def evaluate(word_map, encoder, decoder, dataset, beam_size, max_step=50):
     
     references = list()
     hypotheses = list() 
+    image_ids = list()
     
     with torch.no_grad():
-        for i, (imgs, caps, caplens, allcaps) in enumerate(tqdm.tqdm(loader, desc="EVALUATING AT BEAM SIZE {}".format(beam_size), total=len(loader))):
+        for i, (img_id, imgs, caps, caplens, allcaps) in enumerate(tqdm.tqdm(loader, desc="EVALUATING AT BEAM SIZE {}".format(beam_size), total=len(loader))):
             completed_seqs, completed_seqs_scores, completed_seqs_alpha = beam_search(encoder, decoder, imgs, word_map, beam_size=beam_size, max_step=max_step)
             try:
                 i = completed_seqs_scores.index(max(completed_seqs_scores))
@@ -132,6 +137,8 @@ def evaluate(word_map, encoder, decoder, dataset, beam_size, max_step=50):
                 references.append(img_captions)
                 hypotheses.append([w for w in seq if w not in {word_map['<start>'],word_map['<end>'],word_map['<pad>']}])
                 
+                image_ids.append(img_id.item())
+                
                 assert len(hypotheses) == len(references)
                 
             except Exception as  e:
@@ -139,12 +146,48 @@ def evaluate(word_map, encoder, decoder, dataset, beam_size, max_step=50):
         
         all_bleu = list()
         
-        for i in range(1, 6):
-            curb = i
-            all_bleu.append(corpus_bleu(references, hypotheses, weights=tuple([1.0/float(curb) for _ in range(i)])))
+        REFERENCES = {}
+        HYPOTHESES = {}
         
         
-        return all_bleu
+        assert len(image_ids) == len(hypotheses) and len(image_ids) == len(references)
+        
+        for i in range(len(image_ids)):
+            refs = references[i]
+            id = image_ids[i]
+            hyp = hypotheses[i]
+            REFERENCES[id] = []
+            for r in refs:
+                rr = [rev_wordmap[o] for o in r]
+                rr = " ".join(rr)
+                REFERENCES[id].append(rr)
+            
+            HYPOTHESES[id] = []
+            hh = [rev_wordmap[o] for o in hyp]
+            hh = " ".join(hh)
+            HYPOTHESES[id].append(hh)
+        
+        # print(REFERENCES, file=open("REF.txt", "w+"))
+        # print(HYPOTHESES, file=open("HYP.txt", "w+"))
+
+        # Metrics
+                
+        bleu = Bleu(n=4)
+        all_bleu, _ = bleu.compute_score(REFERENCES, HYPOTHESES)
+        
+        meteor = Meteor()
+        meteor_score, _ = meteor.compute_score(REFERENCES, HYPOTHESES)
+        
+        rouge = Rouge()
+        rouge_score, _ = rouge.compute_score(REFERENCES, HYPOTHESES)
+        
+        cider = Cider()
+        cider_score, _ = cider.compute_score(REFERENCES, HYPOTHESES)
+        
+        spice = Spice()
+        spice_score, _ = spice.compute_score(REFERENCES, HYPOTHESES)
+
+        return all_bleu, meteor_score, rouge_score, cider_score, spice_score
 
 
 def visualize_attention(seed, image_path, seq, alphas, rev_wordmap, smooth=True, max_step=50):
